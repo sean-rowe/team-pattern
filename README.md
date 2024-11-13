@@ -431,12 +431,8 @@ class UserFetcher:
         **Example:**
             ```python
             fetcher = UserFetcher("https://api.example.com")
-            try:
-                user_state = await fetcher.get_user(123)
-                print(f"Found user: {user_state.username}")
-            except (requests.RequestException, ValueError, ValidationError) as e:
-                # Handle error at the caller level
-                pass
+            user_state = await fetcher.get_user(123)
+            print(f"Found user: {user_state.username}")
             ```
 
         **Parameters:**
@@ -471,18 +467,13 @@ class UserFetcher:
         FetcherErrors.raise_if_invalid_email(data.get("email", ""))
         
         # Convert fetched data to UserState
-        try:
-            user_state = UserState(
+            return UserState(
                 user_id=UUID(data["id"]),
                 email=data["email"],
                 username=data["username"],
                 created_at=datetime.fromisoformat(data["created_at"]),
                 is_active=data["is_active"]
             )
-        except (ValueError, TypeError) as e:
-            raise ValidationError(f"Data conversion error: {e}")
-        
-        return user_state
 ```
 
 ### Key Differences and Improvements in the Good Implementation
@@ -1094,24 +1085,20 @@ class UserDelegator:
         **Returns:**
             - `UserState`: The final user state after processing.
         """
-        try:
-            # Fetch user data using Fetcher
-            user_state = await self.user_fetcher.get_user(user_id)
+        # Fetch user data using Fetcher
+        user_state = await self.user_fetcher.get_user(user_id)
             
-            # Use Worker to normalize email
-            state_with_normalized_email = self.email_worker.normalize_email(user_state)
+        # Use Worker to normalize email
+        state_with_normalized_email = self.email_worker.normalize_email(user_state)
             
-            # Use Investigator to make decisions
-            if self.email_investigator.is_eligible_for_verification(state_with_normalized_email):
-                # Use Worker to handle verification
-                final_state = self.verification_worker.verify_user_email(state_with_normalized_email)
-            else:
-                final_state = state_with_normalized_email
+        # Use Investigator to make decisions
+        if self.email_investigator.is_eligible_for_verification(state_with_normalized_email):
+            # Use Worker to handle verification
+            final_state = self.verification_worker.verify_user_email(state_with_normalized_email)
+        else:
+            final_state = state_with_normalized_email
                 
-            return final_state
-        except ValueError as e:
-            # Error handling is delegated to the system executing the Delegator
-            raise
+         return final_state
 ```
 
 **Note:** The Delegator remains focused on orchestrating the workflow without handling errors directly. Errors raised by Workers or Fetchers propagate up to be managed by the system executing the Delegator.
@@ -1238,7 +1225,6 @@ class UserProfileState(BaseModel):
 from uuid import uuid4
 
 # ✅ Correct usage
-try:
     profile = UserProfileState(
         user_id=uuid4(),
         email="user@example.com",
@@ -1248,9 +1234,6 @@ try:
         last_login=datetime.utcnow(),
         preferences={"theme": "dark", "language": "en"}
     )
-except ValueError as e:
-    # Handle structural validation errors
-    print(f"Invalid data structure: {e}")
 
 # ✅ Creating a new state from an existing one
 new_profile = UserProfileState(
