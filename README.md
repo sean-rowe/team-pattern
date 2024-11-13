@@ -11,15 +11,15 @@ This guide introduces the **Team Pattern**—a comprehensive architectural frame
 The Team Pattern is built around six key components, each with a specific role:
 
 1. **Workers**: Handle the core business logic and data transformations, ensuring operations are executed correctly and efficiently. Workers are invoked exclusively by Delegators and must use Error class methods to validate data within the state they process.
-   
-2. **Fetchers**: Manage data access and retrieval from external systems, abstracting complexities and providing clean interfaces for data consumption. Fetchers return Pydantic models representing the extracted data and do not handle errors internally.
-   
+
+2. **Fetchers**: Manage data access and retrieval from external systems, abstracting complexities and providing clean interfaces for data consumption. Fetchers return **State Objects** representing the extracted and validated data and utilize Error components for validation. They do not handle errors internally beyond validation.
+
 3. **Delegators**: Orchestrate workflows by coordinating between Fetchers, Workers, and Investigators to manage complex business processes seamlessly. Delegators contain only a single `process` method, avoid direct data manipulation, do not manage state beyond the provided state objects, and rely on Investigators for decision-making without interacting with Error components.
-   
+
 4. **Investigators**: Enforce business rules and validations, maintaining data integrity by answering specific true/false questions about the data. They are pure functions that check only one condition per method.
-   
-5. **Error Components**: Provide an error handling framework, acting as type guards to validate state objects. They utilize Investigators to assess data and raise exceptions if validations fail. Delegators do not interact directly with Error components; instead, Workers and Investigators handle validations and error assertions.
-   
+
+5. **Error Components**: Provide an error handling framework, acting as type guards to validate state objects. They utilize Investigators to assess data and raise exceptions if validations fail. Delegators do not interact directly with Error components; instead, Workers and Fetchers handle validations and error assertions.
+
 6. **State Models**: Define immutable data structures that traverse the system, ensuring consistency and reliability throughout the processing pipeline. They validate the shape of the data but remain agnostic to business rules, focusing solely on data structure integrity.
 
 ### Principles
@@ -52,7 +52,7 @@ This guide delves into each component of the Team Pattern, providing examples of
    - [Key Differences](#key-differences)
 2. [Fetchers](#fetchers)
    - [❌ Bad Implementation](#bad-implementation)
-   - [✅ Good Implementation](#good-implementation)
+   - [✅ Good Implementation (Compliant Fetcher)](#good-implementation-compliant-fetcher)
    - [Key Differences and Improvements in the Good Implementation](#key-differences-and-improvements-in-the-good-implementation)
 3. [Delegators](#delegators)
    - [❌ Incorrect Delegator Implementation](#incorrect-delegator-implementation)
@@ -280,7 +280,7 @@ class UserRegistrationWorker:
 
 ## Fetchers
 
-**Fetchers** manage data access and retrieval, abstracting the complexities of external systems and providing clean interfaces for data consumption. They do not create state objects but return one or more Pydantic models representing the extracted data. Fetchers do not handle errors; any errors encountered bubble up to be managed by the system executing the Delegator.
+**Fetchers** manage data access and retrieval, abstracting the complexities of external systems and providing clean interfaces for data consumption. They utilize **Error Components** for validation and return **State Objects** representing the extracted and validated data. Fetchers do not handle errors internally beyond validation; any errors encountered during data fetching propagate up to be managed by the system executing the Delegator.
 
 ### ❌ Bad Implementation
 
@@ -324,21 +324,59 @@ class BadUserFetcher:
             del self.cache[user_id]
 ```
 
-### ✅ Good Implementation
+#### Issues with the Incorrect Implementation:
+
+1. **State Management**: Maintains internal state through caching, which violates the pattern's statelessness principle.
+2. **Error Handling**: Handles errors internally instead of allowing them to propagate to be managed by higher-level components.
+3. **Data Manipulation**: Directly manipulates fetched data, introducing business logic into Fetchers.
+4. **Multiple Methods**: Contains additional utility methods beyond data fetching, violating single responsibility.
+
+### ✅ Good Implementation (Compliant Fetcher)
 
 ```python
 from typing import Optional
 import requests
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError, EmailStr
 from datetime import datetime
+from uuid import UUID
 
-class UserData(BaseModel):
-    """Represents user data retrieved from the API"""
-    id: int
+class UserState(BaseModel):
+    user_id: UUID
+    email: EmailStr
     username: str
-    email: str
     created_at: datetime
     is_active: bool = Field(default=True)
+    
+    class Config:
+        frozen = True
+
+class FetcherInvestigator:
+    """
+    Investigator class to validate fetched data.
+    """
+    @staticmethod
+    def has_required_fields(data: dict) -> bool:
+        required_fields = {"id", "username", "email", "created_at", "is_active"}
+        return required_fields.issubset(data.keys())
+
+    @staticmethod
+    def is_email_valid(email: str) -> bool:
+        return '@' in email
+
+class FetcherErrors:
+    """
+    Error component to handle validation errors in Fetchers.
+    """
+    @staticmethod
+    def raise_if_missing_fields(data: dict) -> None:
+        if not FetcherInvestigator.has_required_fields(data):
+            missing = {"id", "username", "email", "created_at", "is_active"} - data.keys()
+            raise ValueError(f"Missing fields in fetched data: {missing}")
+
+    @staticmethod
+    def raise_if_invalid_email(email: str) -> None:
+        if not FetcherInvestigator.is_email_valid(email):
+            raise ValueError("Invalid email format in fetched data")
 
 class UserFetcher:
     """Fetches user data from the external API service."""
@@ -352,25 +390,26 @@ class UserFetcher:
         """
         self.base_url = base_url
 
-    async def get_user(self, user_id: int) -> UserData:
+    async def get_user(self, user_id: int) -> UserState:
         """
         Retrieves user data from the API for a given user ID.
 
         **Summary:**
-            Fetches user information from the external API service and returns it as
-            a validated `UserData` model.
+            Fetches user information from the external API service, validates it, and returns it as
+            a validated `UserState` model.
 
         **Remarks:**
             - Performs a direct API call without caching.
             - All errors are propagated to the caller for handling.
+            - Utilizes Error Components for validation.
 
         **Example:**
             ```python
             fetcher = UserFetcher("https://api.example.com")
             try:
-                user_data = await fetcher.get_user(123)
-                print(f"Found user: {user_data.username}")
-            except requests.RequestException as e:
+                user_state = await fetcher.get_user(123)
+                print(f"Found user: {user_state.username}")
+            except (requests.RequestException, ValueError, ValidationError) as e:
                 # Handle error at the caller level
                 pass
             ```
@@ -379,14 +418,17 @@ class UserFetcher:
             - `user_id (int)`: The unique identifier of the user to retrieve
 
         **Returns:**
-            - `UserData`: A Pydantic model containing the validated user data
+            - `UserState`: An immutable state object containing the validated user data
 
         **Throws:**
             - `requests.RequestException`: When the API request fails
+            - `ValueError`: When fetched data fails validation checks
             - `ValidationError`: When the response data doesn't match the expected schema
 
         **See:**
-            - `UserData`
+            - `UserState`
+            - `FetcherInvestigator`
+            - `FetcherErrors`
             - [API Documentation](https://api.example.com/docs#get-user)
         """
         response = requests.get(f"{self.base_url}/users/{user_id}")
@@ -394,43 +436,98 @@ class UserFetcher:
         # Let the response error propagate up
         response.raise_for_status()
         
-        # Return validated Pydantic model
-        return UserData(**response.json())
+        # Parse JSON response
+        data = response.json()
+        
+        # Validate presence of required fields
+        FetcherErrors.raise_if_missing_fields(data)
+        
+        # Validate email format
+        FetcherErrors.raise_if_invalid_email(data.get("email", ""))
+        
+        # Convert fetched data to UserState
+         return UserState(
+             user_id=UUID(data["id"]),
+             email=data["email"],
+             username=data["username"],
+             created_at=datetime.fromisoformat(data["created_at"]),
+             is_active=data["is_active"]
+         )
 ```
 
 ### Key Differences and Improvements in the Good Implementation
 
-1. **Documentation**:
-   - Comprehensive docstrings following pydoc style.
-   - Clear sections for Summary, Remarks, Example, Parameters, Returns, and Throws.
-   - Documentation of parameters, returns, and possible exceptions.
-   
-2. **Error Handling**:
-   - No internal error handling.
-   - Allows errors to bubble up to the caller.
-   - Clear documentation of what might be thrown.
-   
-3. **State Management**:
-   - No caching or state maintenance.
-   - Pure data fetching functionality.
-   
-4. **Data Structure**:
-   - Uses Pydantic model for data validation.
-   - Clear type hints.
-   - No data manipulation.
-   
-5. **Method Structure**:
-   - Single method for fetching.
-   - No additional utility methods.
-   - Clear, focused responsibility.
-   
-6. **Async Support**:
-   - Implements async pattern for I/O operations.
-   - Better scalability.
-   
-7. **Validation**:
-   - Uses Pydantic for automatic validation.
-   - Clear data contract through the model.
+1. **State Object Return**:
+   - **Bad**: Returns raw dictionaries with potential errors.
+   - **Good**: Returns a **State Object** (`UserState`) that is immutable and validated.
+
+2. **Assertions and Validations**:
+   - **Good**: Utilizes **Error Components** (`FetcherErrors`) and **Investigators** (`FetcherInvestigator`) to validate fetched data before converting it into a state object.
+   - **Error Handling**: Raises exceptions (`ValueError`, `ValidationError`) directly within the Fetcher when validations fail, allowing higher-level components to handle them appropriately.
+
+3. **Immutable State Models**:
+   - **Good**: Uses Pydantic's `BaseModel` with `frozen=True` to ensure immutability, preventing unintended side-effects.
+
+4. **Clear Separation of Concerns**:
+   - **Good**: Fetchers focus solely on data retrieval and initial validation, leaving business logic to Workers and Investigators.
+
+5. **Comprehensive Documentation**:
+   - **Good**: Detailed docstrings explaining the purpose, parameters, returns, and exceptions of each method.
+
+6. **No Internal State Management**:
+   - **Good**: Does not maintain internal caches or states, adhering to the statelessness principle of Fetchers.
+
+7. **Error Propagation**:
+   - **Good**: Allows errors to propagate up, enabling centralized error handling at the system level.
+
+8. **Data Conversion and Validation**:
+   - **Good**: Converts raw fetched data into structured `UserState` objects, ensuring data integrity through type validation and explicit field definitions.
+
+### Example Usage in a Delegator
+
+To illustrate how the compliant Fetcher integrates within the overall architecture, here's how it can be utilized within a Delegator:
+
+```python
+class UserDelegator:
+    def __init__(
+        self,
+        user_fetcher: UserFetcher,
+        email_worker: EmailWorker,
+        verification_worker: VerificationWorker,
+        email_investigator: EmailInvestigator
+    ):
+        self.user_fetcher = user_fetcher
+        self.email_worker = email_worker
+        self.verification_worker = verification_worker
+        self.email_investigator = email_investigator
+
+    async def process(self, user_id: int) -> UserState:
+        """
+        Orchestrates the user verification workflow.
+
+        **Parameters:**
+            - `user_id (int)`: The unique identifier of the user.
+
+        **Returns:**
+            - `UserState`: The final user state after processing.
+        """
+        # Fetch user data using Fetcher
+        user_state = await self.user_fetcher.get_user(user_id)
+        
+        # Use Worker to normalize email
+        state_with_normalized_email = self.email_worker.normalize_email(user_state)
+        
+        # Use Investigator to make decisions
+        if self.email_investigator.is_eligible_for_verification(state_with_normalized_email):
+            # Use Worker to handle verification
+            final_state = self.verification_worker.verify_user_email(state_with_normalized_email)
+        else:
+            final_state = state_with_normalized_email
+            
+        return final_state
+```
+
+**Note:** Since Fetchers now return state objects, Delegators can directly work with these validated and immutable objects, ensuring that downstream Workers receive consistent and reliable data.
 
 ---
 
@@ -498,9 +595,10 @@ class BadUserDelegator:
 from typing import Optional
 from pydantic import BaseModel, Field
 from datetime import datetime
+from uuid import UUID
 
 class UserState(BaseModel):
-    user_id: str
+    user_id: UUID
     email: Optional[str] = None
     is_verified: bool = False
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -513,14 +611,37 @@ class UserData(BaseModel):
     email: str
 
 class UserFetcher:
-    async def get_user(self, user_id: str) -> UserData:
+    async def get_user(self, user_id: int) -> UserState:
         # Fetch user data from external system
         # Example implementation
         # In a real scenario, this would perform an API call or database query
-        return UserData(id=1, email="User@Example.com")
+        # For demonstration, we simulate fetched data
+        fetched_data = {
+            "id": user_id,
+            "email": "User@Example.com",
+            "username": "exampleuser",
+            "created_at": "2023-10-01T12:00:00Z",
+            "is_active": True
+        }
+        
+        # Validate and convert fetched data to UserState
+        FetcherErrors.raise_if_missing_fields(fetched_data)
+        FetcherErrors.raise_if_invalid_email(fetched_data.get("email", ""))
+        
+        try:
+            user_state = UserState(
+                user_id=UUID(int=fetched_data["id"]),  # Assuming UUID based on ID
+                email=fetched_data["email"],
+                is_verified=False,
+                created_at=datetime.fromisoformat(fetched_data["created_at"].replace("Z", "+00:00"))
+            )
+        except (ValueError, TypeError) as e:
+            raise ValidationError(f"Data conversion error: {e}")
+        
+        return user_state
 
 class EmailWorker:
-    async def normalize_email(self, state: UserState) -> UserState:
+    def normalize_email(self, state: UserState) -> UserState:
         """
         Normalizes the user's email to lowercase.
 
@@ -530,19 +651,19 @@ class EmailWorker:
         **Returns:**
             - `UserState`: A new state with the normalized email.
         """
-        # ✅ Validate email using Error methods (handled within the worker)
+        # Validate email using Error methods
         UserRegistrationErrors.raise_if_invalid_email(state.email)
-
-        # ✅ Return new immutable state with normalized email
+        
+        # Return new immutable state with normalized email
         return UserState(
             user_id=state.user_id,
-            email=state.email.lower(),
+            email=state.email.lower() if state.email else None,
             is_verified=state.is_verified,
             created_at=state.created_at
         )
 
 class VerificationWorker:
-    async def verify_user_email(self, state: UserState) -> UserState:
+    def verify_user_email(self, state: UserState) -> UserState:
         """
         Marks the user's email as verified.
 
@@ -577,37 +698,26 @@ class UserDelegator:
         self.verification_worker = verification_worker
         self.email_investigator = email_investigator
 
-    async def process(self, user_id: str) -> UserState:
+    async def process(self, user_id: int) -> UserState:
         """
         Orchestrates the user verification workflow.
 
         **Parameters:**
-            - `user_id (str)`: The unique identifier of the user.
+            - `user_id (int)`: The unique identifier of the user.
 
         **Returns:**
             - `UserState`: The final user state after processing.
         """
-        # Create initial state
-        initial_state = UserState(user_id=user_id)
-        
         # Fetch user data using Fetcher
-        user_data = await self.user_fetcher.get_user(user_id)
-        
-        # Update state with fetched data
-        updated_state = UserState(
-            user_id=initial_state.user_id,
-            email=user_data.email,
-            is_verified=initial_state.is_verified,
-            created_at=initial_state.created_at
-        )
+        user_state = await self.user_fetcher.get_user(user_id)
         
         # Use Worker to normalize email
-        state_with_normalized_email = await self.email_worker.normalize_email(updated_state)
+        state_with_normalized_email = self.email_worker.normalize_email(user_state)
         
         # Use Investigator to make decisions
         if self.email_investigator.is_eligible_for_verification(state_with_normalized_email):
             # Use Worker to handle verification
-            final_state = await self.verification_worker.verify_user_email(state_with_normalized_email)
+            final_state = self.verification_worker.verify_user_email(state_with_normalized_email)
         else:
             final_state = state_with_normalized_email
             
@@ -638,24 +748,46 @@ For completeness, here’s how the supporting components might look:
 
 ```python
 class UserFetcher:
-    async def get_user(self, user_id: str) -> UserData:
+    async def get_user(self, user_id: int) -> UserState:
         # Fetch user data from external system
         # Example implementation
         # In a real scenario, this would perform an API call or database query
-        return UserData(id=1, email="User@Example.com")
+        fetched_data = {
+            "id": user_id,
+            "email": "User@Example.com",
+            "username": "exampleuser",
+            "created_at": "2023-10-01T12:00:00Z",
+            "is_active": True
+        }
+        
+        # Validate and convert fetched data to UserState
+        FetcherErrors.raise_if_missing_fields(fetched_data)
+        FetcherErrors.raise_if_invalid_email(fetched_data.get("email", ""))
+        
+        try:
+            user_state = UserState(
+                user_id=UUID(int=fetched_data["id"]),  # Assuming UUID based on ID
+                email=fetched_data["email"],
+                is_verified=False,
+                created_at=datetime.fromisoformat(fetched_data["created_at"].replace("Z", "+00:00"))
+            )
+        except (ValueError, TypeError) as e:
+            raise ValidationError(f"Data conversion error: {e}")
+        
+        return user_state
 
 class EmailWorker:
-    async def normalize_email(self, state: UserState) -> UserState:
+    def normalize_email(self, state: UserState) -> UserState:
         # Normalize email and return new state
         return UserState(
             user_id=state.user_id,
-            email=state.email.lower(),
+            email=state.email.lower() if state.email else None,
             is_verified=state.is_verified,
             created_at=state.created_at
         )
 
 class VerificationWorker:
-    async def verify_user_email(self, state: UserState) -> UserState:
+    def verify_user_email(self, state: UserState) -> UserState:
         # Verify email and return new state
         return UserState(
             user_id=state.user_id,
@@ -776,7 +908,7 @@ This approach ensures that Investigators remain focused, maintainable, and easy 
 
 ## Error Components
 
-**Error** components provide an error handling framework, acting as type guards to validate state objects. They utilize Investigators to assess data and raise exceptions if validations fail. Delegators do not interact directly with Error components; instead, Workers and Investigators handle validations and error assertions.
+**Error Components** provide an error handling framework, acting as type guards to validate state objects. They utilize **Investigators** to assess data and raise exceptions if validations fail. Delegators do not interact directly with Error components; instead, Workers and Fetchers handle validations and error assertions.
 
 ### ❌ Incorrect Implementation
 
@@ -897,23 +1029,23 @@ class UserWorker:
 1. **Separation of Concerns**:
    - **Incorrect**: Mixes business logic, validation, and processing within the Error class.
    - **Correct**: Separates business rule validation into `UserInvestigator` and assertion methods into `UserError`.
-   
+
 2. **Single Responsibility**:
    - **Incorrect**: Methods perform multiple validations and contain processing logic.
    - **Correct**: Each assertion method focuses on a single validation, leveraging Investigators for business rules.
-   
+
 3. **Pure Functions**:
    - **Incorrect**: Includes state modification and non-static methods.
    - **Correct**: Uses only static methods without modifying state.
-   
+
 4. **Error Handling**:
    - **Incorrect**: Mixes boolean returns with assertions.
    - **Correct**: Consistently uses methods that raise exceptions directly.
-   
+
 5. **Business Logic Location**:
    - **Incorrect**: Embeds business logic directly in the Error class.
    - **Correct**: Delegates business logic to Investigators.
-   
+
 6. **Method Structure**:
    - **Incorrect**: Methods perform multiple tasks.
    - **Correct**: Methods are focused and single-purpose.
@@ -923,42 +1055,55 @@ class UserWorker:
 ```python
 # Example Delegator using the correct implementation
 class UserDelegator:
-    @staticmethod
-    async def process(user: UserState) -> UserState:
+    def __init__(
+        self,
+        user_fetcher: UserFetcher,
+        email_worker: EmailWorker,
+        verification_worker: VerificationWorker,
+        email_investigator: EmailInvestigator
+    ):
+        self.user_fetcher = user_fetcher
+        self.email_worker = email_worker
+        self.verification_worker = verification_worker
+        self.email_investigator = email_investigator
+
+    async def process(self, user_id: int) -> UserState:
+        """
+        Orchestrates the user verification workflow.
+
+        **Parameters:**
+            - `user_id (int)`: The unique identifier of the user.
+
+        **Returns:**
+            - `UserState`: The final user state after processing.
+        """
         try:
-            # Delegator doesn't handle errors directly
-            return await UserWorker.process_user(user)
+            # Fetch user data using Fetcher
+            user_state = await self.user_fetcher.get_user(user_id)
+            
+            # Use Worker to normalize email
+            state_with_normalized_email = self.email_worker.normalize_email(user_state)
+            
+            # Use Investigator to make decisions
+            if self.email_investigator.is_eligible_for_verification(state_with_normalized_email):
+                # Use Worker to handle verification
+                final_state = self.verification_worker.verify_user_email(state_with_normalized_email)
+            else:
+                final_state = state_with_normalized_email
+                
+            return final_state
         except ValueError as e:
             # Error handling is delegated to the system executing the Delegator
             raise
-
-# System level execution
-async def execute_workflow(user_data: dict):
-    try:
-        user_state = UserState(**user_data)
-        result = await UserDelegator.process(user_state)
-        return result
-    except ValueError as e:
-        # Handle errors at the system level
-        logger.error(f"Validation error: {str(e)}")
-        raise
 ```
 
-The correct implementation demonstrates:
-
-- **Clear Separation**: Validation logic is separated between Investigators and Error components.
-- **Single Responsibility**: Each method handles one specific validation.
-- **Pure Functions**: No side effects or state modifications.
-- **Consistent Error Handling**: Uses methods that raise exceptions directly.
-- **Proper Delegation**: Business rules are handled by Investigators, keeping Error components focused on validations.
-
-This structure enhances maintainability, testability, and clarity, adhering to the architectural pattern's principles.
+**Note:** The Delegator remains focused on orchestrating the workflow without handling errors directly. Errors raised by Workers or Fetchers propagate up to be managed by the system executing the Delegator.
 
 ---
 
 ## State Models
 
-**State** models define immutable data structures that traverse the system, ensuring consistency and reliability throughout the processing pipeline. They validate the shape of the data but remain agnostic to business rules, focusing solely on data structure integrity.
+**State Models** define immutable data structures that traverse the system, ensuring consistency and reliability throughout the processing pipeline. They validate the shape of the data but remain agnostic to business rules, focusing solely on data structure integrity.
 
 ### ❌ Incorrect Implementation
 
@@ -1013,7 +1158,7 @@ class UserProfileState(BaseModel):
 ### ✅ Correct Implementation
 
 ```python
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, EmailStr
 from datetime import datetime
 from typing import Dict, Literal, Optional
 from uuid import UUID
@@ -1024,7 +1169,7 @@ class UserProfileState(BaseModel):
     Only validates data structure, not business rules.
     """
     user_id: UUID
-    email: str
+    email: EmailStr
     name: str
     age: int = Field(ge=0)  # ✅ Structural validation only
     subscription_status: Literal["free", "premium", "enterprise"]
@@ -1113,12 +1258,21 @@ class UserProfileInvestigator:
     def is_premium_user(state: UserProfileState) -> bool:
         return state.subscription_status == "premium"
 
+    @staticmethod
+    def is_adult(state: UserProfileState) -> bool:
+        return state.age >= 18
+
 # ✅ This belongs in an Error class
 class UserProfileError:
     @staticmethod
     def raise_if_invalid_age(state: UserProfileState) -> None:
         if not UserProfileInvestigator.is_adult(state):
             raise ValueError(f"User must be 18 or older. Current age: {state.age}")
+
+    @staticmethod
+    def raise_if_not_premium(state: UserProfileState) -> None:
+        if not UserProfileInvestigator.is_premium_user(state):
+            raise ValueError("User is not a premium member")
 
 # ✅ This belongs in a Worker class
 class UserProfileWorker:
@@ -1168,3 +1322,4 @@ By following these guidelines and maintaining the integrity of each component's 
 ---
 
 *This guide serves as a comprehensive reference for implementing the architectural pattern, ensuring best practices are followed, and promoting a robust software development lifecycle.*
+
