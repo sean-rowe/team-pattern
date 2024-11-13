@@ -10,16 +10,16 @@ This guide introduces the **Team Pattern**—a comprehensive architectural frame
 
 The Team Pattern is built around six key components, each with a specific role:
 
-1. **Workers**: Handle the core business logic and data transformations, ensuring operations are executed correctly and efficiently. Workers are invoked exclusively by Delegators and must use Error class `assertion` methods to validate data within the state they process.
-
+1. **Workers**: Handle the core business logic and data transformations, ensuring operations are executed correctly and efficiently. Workers are invoked exclusively by Delegators and must use Error class methods to validate data within the state they process.
+   
 2. **Fetchers**: Manage data access and retrieval from external systems, abstracting complexities and providing clean interfaces for data consumption. Fetchers return Pydantic models representing the extracted data and do not handle errors internally.
-
+   
 3. **Delegators**: Orchestrate workflows by coordinating between Fetchers, Workers, and Investigators to manage complex business processes seamlessly. Delegators contain only a single `process` method, avoid direct data manipulation, do not manage state beyond the provided state objects, and rely on Investigators for decision-making without interacting with Error components.
-
+   
 4. **Investigators**: Enforce business rules and validations, maintaining data integrity by answering specific true/false questions about the data. They are pure functions that check only one condition per method.
-
+   
 5. **Error Components**: Provide an error handling framework, acting as type guards to validate state objects. They utilize Investigators to assess data and raise exceptions if validations fail. Delegators do not interact directly with Error components; instead, Workers and Investigators handle validations and error assertions.
-
+   
 6. **State Models**: Define immutable data structures that traverse the system, ensuring consistency and reliability throughout the processing pipeline. They validate the shape of the data but remain agnostic to business rules, focusing solely on data structure integrity.
 
 ### Principles
@@ -79,7 +79,7 @@ This guide delves into each component of the Team Pattern, providing examples of
 
 ## Workers
 
-**Workers** handle the core logic and transformations, ensuring that business operations are executed correctly and efficiently. They are exclusively invoked by Delegators and must utilize Error class `assertion` methods to validate the data within the state they process. Workers can contain multiple independent methods, each responsible for a specific task. However, Worker methods must not call other Workers or their methods, maintaining independence and ensuring Workers are the final step in their respective processing pipelines.
+**Workers** handle the core logic and transformations, ensuring that business operations are executed correctly and efficiently. They are exclusively invoked by Delegators and must utilize Error class methods to validate the data within the state they process. Workers can contain multiple independent methods, each responsible for a specific task. However, Worker methods must not call other Workers or their methods, maintaining independence and ensuring Workers are the final step in their respective processing pipelines.
 
 ### ❌ Bad Example (Non-Compliant Worker)
 
@@ -155,12 +155,12 @@ class UserRegistrationInvestigator:
 
 class UserRegistrationErrors:
     @staticmethod
-    def assert_valid_email(email: str) -> None:
+    def raise_if_invalid_email(email: str) -> None:
         if not UserRegistrationInvestigator.is_valid_email(email):
             raise ValueError("Invalid email format")
 
     @staticmethod
-    def assert_valid_password_length(password: str) -> None:
+    def raise_if_invalid_password_length(password: str) -> None:
         if not UserRegistrationInvestigator.is_valid_password_length(password):
             raise ValueError("Password too short")
 
@@ -175,7 +175,7 @@ class UserRegistrationWorker:
     **Remarks:**
         - Designed to be invoked only by Delegators
         - Performs email normalization and timestamp assignment
-        - Utilizes Error assertions for validation
+        - Utilizes Error methods for validation
         - Maintains immutability by creating new state objects
 
     **Example:**
@@ -185,9 +185,9 @@ class UserRegistrationWorker:
             password="securepass123"
         )
         worker = UserRegistrationWorker()
-        normalized_state = worker.normalize_email(initial_state)
-        timestamped_state = worker.assign_creation_timestamp(normalized_state)
-        worker.log_registration(timestamped_state)
+        processed_state = worker.normalize_email(initial_state)
+        processed_state = worker.assign_creation_timestamp(processed_state)
+        worker.log_registration(processed_state)
         ```
 
     **Throws:**
@@ -218,8 +218,8 @@ class UserRegistrationWorker:
         **Returns:**
             - `UserState`: A new state with the email normalized.
         """
-        # ✅ Validate email using Error assertions
-        UserRegistrationErrors.assert_valid_email(state.email)
+        # ✅ Validate email using Error methods
+        UserRegistrationErrors.raise_if_invalid_email(state.email)
 
         # ✅ Return new immutable state with normalized email
         return UserState(
@@ -259,20 +259,22 @@ class UserRegistrationWorker:
 ### Key Differences
 
 1. **Declarative Method Names**: Instead of generic names like `process_registration`, methods are named based on their specific tasks, such as `normalize_email`, `assign_creation_timestamp`, and `log_registration`.
-
-2. **Multiple Independent Methods**: The Worker contains multiple methods that handle distinct tasks without interdependencies or calls to other Workers.
-
-3. **Comprehensive Documentation**: Each method includes detailed docstrings explaining its purpose, parameters, returns, and potential exceptions.
-
-4. **Error Assertions**: Utilizes dedicated Error class methods that leverage Investigators for validation instead of performing direct validation.
-
-5. **No Branching**: Avoids conditional logic within Worker methods, delegating decision-making to Investigators.
-
-6. **Immutability**: Creates new state objects rather than modifying existing ones, maintaining immutability throughout the processing.
-
-7. **No Worker Chaining**: Methods do not call other Workers, ensuring that Workers remain the final step in their respective processing pipelines.
-
-8. **Clear Separation of Concerns**: Each method within the Worker handles its specific responsibility without overlapping functionalities.
+   
+2. **Single Parameter (State Object)**: All Worker methods accept only the `UserState` object, ensuring that Workers do not depend on external parameters. Any additional data required must be encapsulated within the state object.
+   
+3. **Multiple Independent Methods**: The Worker contains multiple methods that handle distinct tasks without interdependencies or calls to other Workers.
+   
+4. **Comprehensive Documentation**: Each method includes detailed docstrings explaining its purpose, parameters, returns, and potential exceptions.
+   
+5. **Error Handling**: Utilizes dedicated Error class methods that leverage Investigators for validation instead of performing direct validation.
+   
+6. **No Branching**: Avoids conditional logic within Worker methods, delegating decision-making to Investigators.
+   
+7. **Immutability**: Creates new state objects rather than modifying existing ones, maintaining immutability throughout the processing.
+   
+8. **No Worker Chaining**: Methods do not call other Workers, ensuring that Workers remain the final step in their respective processing pipelines.
+   
+9. **Clear Separation of Concerns**: Each method within the Worker handles its specific responsibility without overlapping functionalities.
 
 ---
 
@@ -402,30 +404,30 @@ class UserFetcher:
    - Comprehensive docstrings following pydoc style.
    - Clear sections for Summary, Remarks, Example, Parameters, Returns, and Throws.
    - Documentation of parameters, returns, and possible exceptions.
-
+   
 2. **Error Handling**:
    - No internal error handling.
    - Allows errors to bubble up to the caller.
    - Clear documentation of what might be thrown.
-
+   
 3. **State Management**:
    - No caching or state maintenance.
    - Pure data fetching functionality.
-
+   
 4. **Data Structure**:
    - Uses Pydantic model for data validation.
    - Clear type hints.
    - No data manipulation.
-
+   
 5. **Method Structure**:
    - Single method for fetching.
    - No additional utility methods.
    - Clear, focused responsibility.
-
+   
 6. **Async Support**:
    - Implements async pattern for I/O operations.
    - Better scalability.
-
+   
 7. **Validation**:
    - Uses Pydantic for automatic validation.
    - Clear data contract through the model.
@@ -512,24 +514,29 @@ class UserData(BaseModel):
 
 class UserFetcher:
     async def get_user(self, user_id: str) -> UserData:
-        # Implementation of fetching user data
-        pass
+        # Fetch user data from external system
+        # Example implementation
+        # In a real scenario, this would perform an API call or database query
+        return UserData(id=1, email="User@Example.com")
 
 class EmailWorker:
-    async def normalize_email(self, state: UserState, user_data: UserData) -> UserState:
+    async def normalize_email(self, state: UserState) -> UserState:
         """
         Normalizes the user's email to lowercase.
 
         **Parameters:**
             - `state (UserState)`: The current user state.
-            - `user_data (UserData)`: The fetched user data.
 
         **Returns:**
             - `UserState`: A new state with the normalized email.
         """
+        # ✅ Validate email using Error methods (handled within the worker)
+        UserRegistrationErrors.raise_if_invalid_email(state.email)
+
+        # ✅ Return new immutable state with normalized email
         return UserState(
             user_id=state.user_id,
-            email=user_data.email.lower(),
+            email=state.email.lower(),
             is_verified=state.is_verified,
             created_at=state.created_at
         )
@@ -586,11 +593,16 @@ class UserDelegator:
         # Fetch user data using Fetcher
         user_data = await self.user_fetcher.get_user(user_id)
         
-        # Use Worker to normalize email
-        state_with_normalized_email = await self.email_worker.normalize_email(
-            initial_state, 
-            user_data
+        # Update state with fetched data
+        updated_state = UserState(
+            user_id=initial_state.user_id,
+            email=user_data.email,
+            is_verified=initial_state.is_verified,
+            created_at=initial_state.created_at
         )
+        
+        # Use Worker to normalize email
+        state_with_normalized_email = await self.email_worker.normalize_email(updated_state)
         
         # Use Investigator to make decisions
         if self.email_investigator.is_eligible_for_verification(state_with_normalized_email):
@@ -605,14 +617,20 @@ class UserDelegator:
 ### Key Differences
 
 1. **Single `process` Method**: Maintains a single entry point for orchestration logic.
-2. **Declarative Method Names**: Worker methods are named based on their specific tasks, such as `normalize_email` and `verify_user_email`, rather than generic names like `process`.
-3. **Dependencies Injected Through Constructor**: Enhances testability and flexibility by injecting dependencies.
-4. **No Direct Data Manipulation**: Utilizes Workers and Fetchers for data processing instead of manipulating state directly within the Delegator.
-5. **Error Propagation**: Allows errors to bubble up without handling them internally, adhering to the principle that Delegators should not manage errors directly.
-6. **Uses Investigators for Decision-Making**: Delegates business logic decisions to Investigators, keeping Delegators focused on orchestration.
-7. **Immutable State**: Works with immutable state objects to ensure consistency.
-8. **Multiple Independent Worker Methods**: Each Worker method performs a distinct, independent task without interdependencies or calls to other Workers.
-9. **Clear Separation of Concerns**: Each component handles its specific responsibility without overlapping functionalities.
+   
+2. **Dependencies Injected Through Constructor**: Enhances testability and flexibility by injecting dependencies.
+   
+3. **No Direct Data Manipulation**: Utilizes Workers and Fetchers for data processing instead of manipulating state directly within the Delegator.
+   
+4. **Error Propagation**: Allows errors to bubble up without handling them internally, adhering to the principle that Delegators should not manage errors directly.
+   
+5. **Uses Investigators for Decision-Making**: Delegates business logic decisions to Investigators, keeping Delegators focused on orchestration.
+   
+6. **Immutable State**: Works with immutable state objects to ensure consistency.
+   
+7. **Multiple Independent Worker Methods**: Each Worker method performs a distinct, independent task without interdependencies or calls to other Workers.
+   
+8. **Clear Separation of Concerns**: Each component handles its specific responsibility without overlapping functionalities.
 
 ### Supporting Components
 
@@ -622,14 +640,16 @@ For completeness, here’s how the supporting components might look:
 class UserFetcher:
     async def get_user(self, user_id: str) -> UserData:
         # Fetch user data from external system
-        return UserData(...)
+        # Example implementation
+        # In a real scenario, this would perform an API call or database query
+        return UserData(id=1, email="User@Example.com")
 
 class EmailWorker:
-    async def normalize_email(self, state: UserState, user_data: UserData) -> UserState:
+    async def normalize_email(self, state: UserState) -> UserState:
         # Normalize email and return new state
         return UserState(
             user_id=state.user_id,
-            email=user_data.email.lower(),
+            email=state.email.lower(),
             is_verified=state.is_verified,
             created_at=state.created_at
         )
@@ -696,32 +716,44 @@ The above implementation is incorrect because:
 ```python
 class OrderInvestigator:
     @staticmethod
-    def is_order_valid(order_state: OrderState) -> bool:
-        # CORRECT: Single boolean expression combining multiple conditions
-        return (
-            order_state.total_amount > 0 and 
-            order_state.items_count > 0 and 
-            order_state.delivery_address is not None
-        )
+    def has_positive_total_amount(order_state: OrderState) -> bool:
+        # Checks if the total amount is positive
+        return order_state.total_amount > 0
 
     @staticmethod
-    def can_process_order(order_state: OrderState) -> bool:
-        # CORRECT: Single boolean expression
-        return order_state.status == "PENDING" and order_state.payment_verified
+    def has_items(order_state: OrderState) -> bool:
+        # Checks if there is at least one item
+        return order_state.items_count > 0
 
     @staticmethod
-    def is_high_value_order(order_state: OrderState) -> bool:
-        # CORRECT: Single boolean expression
-        return order_state.total_amount >= 1000.00
+    def has_delivery_address(order_state: OrderState) -> bool:
+        # Checks if the delivery address is provided
+        return order_state.delivery_address is not None
 
     @staticmethod
-    def requires_special_handling(order_state: OrderState) -> bool:
-        # CORRECT: Single boolean expression combining multiple conditions
-        return (
-            order_state.has_fragile_items or
-            order_state.requires_refrigeration or
-            order_state.is_oversized
-        )
+    def is_order_pending(order_state: OrderState) -> bool:
+        # Checks if the order status is pending
+        return order_state.status == "PENDING"
+
+    @staticmethod
+    def is_payment_verified(order_state: OrderState) -> bool:
+        # Checks if the payment is verified
+        return order_state.payment_verified
+
+    @staticmethod
+    def has_fragile_items(order_state: OrderState) -> bool:
+        # Checks if the order has fragile items
+        return order_state.has_fragile_items
+
+    @staticmethod
+    def requires_refrigeration(order_state: OrderState) -> bool:
+        # Checks if the order requires refrigeration
+        return order_state.requires_refrigeration
+
+    @staticmethod
+    def is_oversized(order_state: OrderState) -> bool:
+        # Checks if the order is oversized
+        return order_state.is_oversized
 ```
 
 ### Key Differences
@@ -824,25 +856,25 @@ class UserError:
     Correct implementation following the architectural pattern
     """
     @staticmethod
-    def assert_user_active(user: UserState) -> None:
+    def raise_if_user_not_active(user: UserState) -> None:
         """
-        Single assertion method using an Investigator
+        Raises an exception if the user is not active.
         """
         if not UserInvestigator.is_active(user):
             raise ValueError("User must be active")
 
     @staticmethod
-    def assert_user_adult(user: UserState) -> None:
+    def raise_if_user_not_adult(user: UserState) -> None:
         """
-        Single assertion method using an Investigator
+        Raises an exception if the user is not an adult.
         """
         if not UserInvestigator.is_adult(user):
             raise ValueError("User must be 18 or older")
 
     @staticmethod
-    def assert_valid_email(user: UserState) -> None:
+    def raise_if_invalid_email(user: UserState) -> None:
         """
-        Single assertion method using an Investigator
+        Raises an exception if the user's email is invalid.
         """
         if not UserInvestigator.has_valid_email(user):
             raise ValueError("Invalid email format")
@@ -851,10 +883,10 @@ class UserError:
 class UserWorker:
     @staticmethod
     def process_user(user: UserState) -> UserState:
-        # Worker uses Error assertions
-        UserError.assert_user_active(user)
-        UserError.assert_user_adult(user)
-        UserError.assert_valid_email(user)
+        # Worker uses Error methods to validate
+        UserError.raise_if_user_not_active(user)
+        UserError.raise_if_user_not_adult(user)
+        UserError.raise_if_invalid_email(user)
         
         # Continue with processing...
         return user
@@ -865,23 +897,23 @@ class UserWorker:
 1. **Separation of Concerns**:
    - **Incorrect**: Mixes business logic, validation, and processing within the Error class.
    - **Correct**: Separates business rule validation into `UserInvestigator` and assertion methods into `UserError`.
-
+   
 2. **Single Responsibility**:
    - **Incorrect**: Methods perform multiple validations and contain processing logic.
    - **Correct**: Each assertion method focuses on a single validation, leveraging Investigators for business rules.
-
+   
 3. **Pure Functions**:
    - **Incorrect**: Includes state modification and non-static methods.
    - **Correct**: Uses only static methods without modifying state.
-
+   
 4. **Error Handling**:
    - **Incorrect**: Mixes boolean returns with assertions.
-   - **Correct**: Consistently uses assertions to raise exceptions.
-
+   - **Correct**: Consistently uses methods that raise exceptions directly.
+   
 5. **Business Logic Location**:
    - **Incorrect**: Embeds business logic directly in the Error class.
    - **Correct**: Delegates business logic to Investigators.
-
+   
 6. **Method Structure**:
    - **Incorrect**: Methods perform multiple tasks.
    - **Correct**: Methods are focused and single-purpose.
@@ -917,7 +949,7 @@ The correct implementation demonstrates:
 - **Clear Separation**: Validation logic is separated between Investigators and Error components.
 - **Single Responsibility**: Each method handles one specific validation.
 - **Pure Functions**: No side effects or state modifications.
-- **Consistent Error Handling**: Uses assertions to manage errors uniformly.
+- **Consistent Error Handling**: Uses methods that raise exceptions directly.
 - **Proper Delegation**: Business rules are handled by Investigators, keeping Error components focused on validations.
 
 This structure enhances maintainability, testability, and clarity, adhering to the architectural pattern's principles.
@@ -1024,16 +1056,16 @@ class UserProfileState(BaseModel):
 1. **Immutability**:
    - Utilizes `frozen=True` in Pydantic models to prevent state modification after creation.
    - No methods are included that attempt to modify the state.
-
+   
 2. **Structure-Only Validation**:
    - Employs Pydantic's `Field` for basic type and range validation.
    - Does not include business rule validations.
    - Uses precise types with `Literal` for enum-like fields.
-
+   
 3. **Clear Purpose**:
    - Represents data structure without embedding business logic or transformations.
    - Includes metadata such as `created_at` and `version` for tracking.
-
+   
 4. **No Business Logic**:
    - Excludes methods for business rules, transformations, or external interactions.
 
@@ -1084,7 +1116,7 @@ class UserProfileInvestigator:
 # ✅ This belongs in an Error class
 class UserProfileError:
     @staticmethod
-    def assert_valid_age(state: UserProfileState) -> None:
+    def raise_if_invalid_age(state: UserProfileState) -> None:
         if not UserProfileInvestigator.is_adult(state):
             raise ValueError(f"User must be 18 or older. Current age: {state.age}")
 
