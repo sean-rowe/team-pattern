@@ -74,6 +74,30 @@ This guide delves into each component of the Team Pattern, providing examples of
    - [Key Aspects](#key-aspects)
    - [Usage Example](#usage-example-1)
    - [Validation Example (Where It Should Go)](#validation-example-where-it-should-go)
+7. [Hierarchical Groupings: Divisions and Companies](#hierarchical-groupings-divisions-and-companies)
+   - [Overview](#overview)
+   - [Why Hierarchical Groupings?](#why-hierarchical-groupings)
+   - [Terminology Alternatives](#terminology-alternatives)
+   - [Implementing Divisions and Companies](#implementing-divisions-and-companies)
+     - [Structure Overview](#structure-overview)
+     - [Defining Divisions](#defining-divisions)
+     - [Defining Companies](#defining-companies)
+   - [Detailed Implementation](#detailed-implementation)
+     - [Division-Level Organization](#division-level-organization)
+       - [User Management Division Example](#user-management-division-example)
+       - [Product Catalog Division Example](#product-catalog-division-example)
+     - [Company-Level Organization](#company-level-organization)
+       - [E-commerce Platform Company Example](#e-commerce-platform-company-example)
+     - [Benefits of Hierarchical Groupings](#benefits-of-hierarchical-groupings)
+     - [Best Practices](#best-practices)
+   - [Integrating Hierarchical Groupings into the Team Pattern](#integrating-hierarchical-groupings-into-the-team-pattern)
+     - [Maintaining Separation of Concerns](#maintaining-separation-of-concerns)
+     - [Communication Between Levels](#communication-between-levels)
+     - [Example Workflow Across Hierarchical Levels](#example-workflow-across-hierarchical-levels)
+   - [Visual Representation](#visual-representation)
+   - [Conclusion](#conclusion-1)
+8. [Conclusion](#conclusion)
+9. [Additional Recommendations](#additional-recommendations)
 
 ---
 
@@ -390,7 +414,7 @@ class UserFetcher:
         """
         self.base_url = base_url
 
-    async def get_user(self, state: UserState) -> UserState:
+    async def get_user(self, user_id: int) -> UserState:
         """
         Retrieves user data from the API for a given user ID.
 
@@ -415,7 +439,7 @@ class UserFetcher:
             ```
 
         **Parameters:**
-            - `state (UserState)`: The user state object containing the current user state
+            - `user_id (int)`: The unique identifier of the user to retrieve
 
         **Returns:**
             - `UserState`: An immutable state object containing the validated user data
@@ -431,7 +455,7 @@ class UserFetcher:
             - `FetcherErrors`
             - [API Documentation](https://api.example.com/docs#get-user)
         """
-        response = requests.get(f"{self.base_url}/users/{state.user_id}")
+        response = requests.get(f"{self.base_url}/users/{user_id}")
         
         # Let the response error propagate up
         response.raise_for_status()
@@ -446,13 +470,18 @@ class UserFetcher:
         FetcherErrors.raise_if_invalid_email(data.get("email", ""))
         
         # Convert fetched data to UserState
-         return UserState(
-             user_id=UUID(data["id"]),
-             email=data["email"],
-             username=data["username"],
-             created_at=datetime.fromisoformat(data["created_at"]),
-             is_active=data["is_active"]
-         )
+        try:
+            user_state = UserState(
+                user_id=UUID(data["id"]),
+                email=data["email"],
+                username=data["username"],
+                created_at=datetime.fromisoformat(data["created_at"]),
+                is_active=data["is_active"]
+            )
+        except (ValueError, TypeError) as e:
+            raise ValidationError(f"Data conversion error: {e}")
+        
+        return user_state
 ```
 
 ### Key Differences and Improvements in the Good Implementation
@@ -613,7 +642,6 @@ class UserFetcher:
         # Fetch user data from external system
         # Example implementation
         # In a real scenario, this would perform an API call or database query
-        # For demonstration, we simulate fetched data
         fetched_data = {
             "id": user_id,
             "email": "User@Example.com",
@@ -696,13 +724,13 @@ class UserDelegator:
         Orchestrates the user verification workflow.
 
         **Parameters:**
-            - `state: UserState`: The unique identifier of the user.
+            - `user_id (int)`: The unique identifier of the user.
 
         **Returns:**
             - `UserState`: The final user state after processing.
         """
         # Fetch user data using Fetcher
-        user_state = await self.user_fetcher.get_user(state.user_id)
+        user_state = await self.user_fetcher.get_user(user_id)
         
         # Use Worker to normalize email
         state_with_normalized_email = self.email_worker.normalize_email(user_state)
@@ -818,11 +846,11 @@ class OrderInvestigator:
     def can_process_order(order_state: OrderState) -> bool:
         # INCORRECT: Multiple conditions with multiple if/then statements
         if order_state.status == "PENDING":
-          return True
+            return True
 
-        if order_state.name === 'SomeName'
-          return true
-          
+        if order_state.name == 'SomeName':
+            return True
+            
         return False
 ```
 
@@ -981,7 +1009,7 @@ class UserError:
         Raises an exception if the user is not active.
         """
         if not UserInvestigator.is_active(user):
-            raise UserError("User must be active")
+            raise ValueError("User must be active")
 
     @staticmethod
     def raise_if_user_not_adult(user: UserState) -> None:
@@ -989,7 +1017,7 @@ class UserError:
         Raises an exception if the user is not an adult.
         """
         if not UserInvestigator.is_adult(user):
-            raise UserError("User must be 18 or older")
+            raise ValueError("User must be 18 or older")
 
     @staticmethod
     def raise_if_invalid_email(user: UserState) -> None:
@@ -997,7 +1025,7 @@ class UserError:
         Raises an exception if the user's email is invalid.
         """
         if not UserInvestigator.has_valid_email(user):
-            raise UserError("Invalid email format")
+            raise ValueError("Invalid email format")
 
 # Example usage in a Worker
 class UserWorker:
@@ -1060,25 +1088,29 @@ class UserDelegator:
         Orchestrates the user verification workflow.
 
         **Parameters:**
-            - `state (UserState)`: The unique identifier of the user.
+            - `user_id (int)`: The unique identifier of the user.
 
         **Returns:**
             - `UserState`: The final user state after processing.
         """
-         # Fetch user data using Fetcher
-         user_state = await self.user_fetcher.get_user(state.user_id)
-         
-         # Use Worker to normalize email
-         state_with_normalized_email = self.email_worker.normalize_email(user_state)
-         
-         # Use Investigator to make decisions
-         if self.email_investigator.is_eligible_for_verification(state_with_normalized_email):
-             # Use Worker to handle verification
-             final_state = self.verification_worker.verify_user_email(state_with_normalized_email)
-         else:
-             final_state = state_with_normalized_email
-             
-         return final_state
+        try:
+            # Fetch user data using Fetcher
+            user_state = await self.user_fetcher.get_user(user_id)
+            
+            # Use Worker to normalize email
+            state_with_normalized_email = self.email_worker.normalize_email(user_state)
+            
+            # Use Investigator to make decisions
+            if self.email_investigator.is_eligible_for_verification(state_with_normalized_email):
+                # Use Worker to handle verification
+                final_state = self.verification_worker.verify_user_email(state_with_normalized_email)
+            else:
+                final_state = state_with_normalized_email
+                
+            return final_state
+        except ValueError as e:
+            # Error handling is delegated to the system executing the Delegator
+            raise
 ```
 
 **Note:** The Delegator remains focused on orchestrating the workflow without handling errors directly. Errors raised by Workers or Fetchers propagate up to be managed by the system executing the Delegator.
@@ -1277,6 +1309,331 @@ The correct implementation ensures that the **State** class remains focused sole
 
 ---
 
+## Hierarchical Groupings: Divisions and Companies
+
+To manage complexity in large-scale applications, it's beneficial to organize Delegators into hierarchical groups. This structure promotes modularity, enhances maintainability, and facilitates clear boundaries between different parts of the system.
+
+### Overview
+
+To enhance the **Team Pattern**, we introduce hierarchical groupings:
+
+- **Delegator**: The foundational unit responsible for orchestrating workflows.
+  
+- **Division**: A collection of related Delegators that handle specific business domains or functionalities.
+  
+- **Company**: A higher-level grouping that encompasses multiple Divisions, representing broader business areas or departments.
+
+### Why Hierarchical Groupings?
+
+1. **Scalability**: As applications grow, organizing Delegators into Divisions and Companies prevents the system from becoming monolithic and unmanageable.
+   
+2. **Modularity**: Clear boundaries between Divisions and Companies allow teams to work independently on different parts of the system.
+   
+3. **Maintainability**: Isolated groups reduce the risk of unintended side-effects when making changes, simplifying debugging and enhancements.
+   
+4. **Reusability**: Common workflows within a Division can be reused across different Companies or modules.
+
+### Terminology Alternatives
+
+If you prefer terminology that's more aligned with software engineering practices, consider the following alternatives:
+
+- **Divisions → Modules/Components**
+  
+- **Companies → Services/Microservices/Systems**
+
+Choose the terminology that best fits your organization's culture and the specific context of your application architecture. For this guide, we'll proceed with **Divisions** and **Companies** as hierarchical groupings within the Team Pattern, ensuring clarity and consistency.
+
+---
+
+## Implementing Divisions and Companies
+
+### Structure Overview
+
+```
+Company
+│
+├── Division A
+│   ├── Delegator A1
+│   ├── Delegator A2
+│   └── ...
+│
+├── Division B
+│   ├── Delegator B1
+│   ├── Delegator B2
+│   └── ...
+│
+└── Division C
+    ├── Delegator C1
+    ├── Delegator C2
+    └── ...
+```
+
+### Defining Divisions
+
+A **Division** groups together Delegators that share a common business domain or functionality. Each Division operates semi-independently, encapsulating its workflows and related components.
+
+#### Example: E-commerce System
+
+- **Company**: E-commerce Platform
+  - **Division A**: User Management
+    - **Delegator A1**: User Registration
+    - **Delegator A2**: User Authentication
+  - **Division B**: Product Catalog
+    - **Delegator B1**: Product Listing
+    - **Delegator B2**: Product Search
+  - **Division C**: Order Processing
+    - **Delegator C1**: Order Creation
+    - **Delegator C2**: Payment Processing
+
+### Defining Companies
+
+A **Company** serves as the top-level grouping that encapsulates all Divisions. It represents the entire application or a major subsystem within a larger ecosystem.
+
+#### Example: Multinational Corporation Software
+
+- **Company**: Global Operations System
+  - **Division A**: HR Management
+    - **Delegator A1**: Employee Onboarding
+    - **Delegator A2**: Payroll Processing
+  - **Division B**: Finance
+    - **Delegator B1**: Budgeting
+    - **Delegator B2**: Expense Tracking
+  - **Division C**: Sales
+    - **Delegator C1**: Lead Management
+    - **Delegator C2**: Sales Analytics
+
+---
+
+## Detailed Implementation
+
+### Division-Level Organization
+
+Each **Division** contains multiple **Delegators** that handle specific workflows. Here's how you can structure them:
+
+#### User Management Division Example
+
+```python
+# user_management/user_registration_delegator.py
+
+from uuid import UUID
+from pydantic import BaseModel
+from workers import UserRegistrationWorker
+from fetchers import UserFetcher
+from errors import UserRegistrationErrors
+
+class UserRegistrationState(BaseModel):
+    user_id: UUID
+    email: str
+    password: str
+    created_at: datetime
+
+    class Config:
+        frozen = True
+
+class UserRegistrationDelegator:
+    def __init__(self, worker: UserRegistrationWorker, fetcher: UserFetcher):
+        self.worker = worker
+        self.fetcher = fetcher
+
+    async def process_registration(self, user_data: dict) -> UserRegistrationState:
+        # Create initial state
+        initial_state = UserRegistrationState(**user_data)
+
+        # Use Worker to normalize email
+        normalized_state = self.worker.normalize_email(initial_state)
+
+        # Additional processing steps can be chained here
+        final_state = self.worker.assign_creation_timestamp(normalized_state)
+
+        return final_state
+```
+
+#### Product Catalog Division Example
+
+```python
+# product_catalog/product_listing_delegator.py
+
+from pydantic import BaseModel
+from workers import ProductListingWorker
+from fetchers import ProductFetcher
+from errors import ProductListingErrors
+
+class ProductListingState(BaseModel):
+    product_id: UUID
+    name: str
+    description: str
+    price: float
+    available_stock: int
+
+    class Config:
+        frozen = True
+
+class ProductListingDelegator:
+    def __init__(self, worker: ProductListingWorker, fetcher: ProductFetcher):
+        self.worker = worker
+        self.fetcher = fetcher
+
+    async def list_products(self, criteria: dict) -> list[ProductListingState]:
+        # Fetch product data using Fetcher
+        products = await self.fetcher.get_products(criteria)
+
+        # Use Worker to format product data
+        formatted_products = [self.worker.format_product(product) for product in products]
+
+        return formatted_products
+```
+
+### Company-Level Organization
+
+At the **Company** level, you aggregate all Divisions, allowing for higher-level orchestration if necessary.
+
+#### E-commerce Platform Company Example
+
+```python
+# ecommerce_platform/company.py
+
+from divisions.user_management.user_registration_delegator import UserRegistrationDelegator
+from divisions.user_management.user_authentication_delegator import UserAuthenticationDelegator
+from divisions.product_catalog.product_listing_delegator import ProductListingDelegator
+from divisions.product_catalog.product_search_delegator import ProductSearchDelegator
+from divisions.order_processing.order_creation_delegator import OrderCreationDelegator
+from divisions.order_processing.payment_processing_delegator import PaymentProcessingDelegator
+
+class ECommerceCompany:
+    def __init__(
+        self,
+        user_registration_delegator: UserRegistrationDelegator,
+        user_authentication_delegator: UserAuthenticationDelegator,
+        product_listing_delegator: ProductListingDelegator,
+        product_search_delegator: ProductSearchDelegator,
+        order_creation_delegator: OrderCreationDelegator,
+        payment_processing_delegator: PaymentProcessingDelegator
+    ):
+        self.user_registration_delegator = user_registration_delegator
+        self.user_authentication_delegator = user_authentication_delegator
+        self.product_listing_delegator = product_listing_delegator
+        self.product_search_delegator = product_search_delegator
+        self.order_creation_delegator = order_creation_delegator
+        self.payment_processing_delegator = payment_processing_delegator
+
+    async def register_user(self, user_data: dict) -> UserRegistrationState:
+        return await self.user_registration_delegator.process_registration(user_data)
+
+    async def authenticate_user(self, credentials: dict) -> UserAuthenticationState:
+        return await self.user_authentication_delegator.process_authentication(credentials)
+
+    async def list_products(self, criteria: dict) -> list[ProductListingState]:
+        return await self.product_listing_delegator.list_products(criteria)
+
+    async def search_products(self, query: str) -> list[ProductSearchState]:
+        return await self.product_search_delegator.search_products(query)
+
+    async def create_order(self, order_data: dict) -> OrderCreationState:
+        return await self.order_creation_delegator.create_order(order_data)
+
+    async def process_payment(self, payment_data: dict) -> PaymentProcessingState:
+        return await self.payment_processing_delegator.process_payment(payment_data)
+```
+
+### Benefits of Hierarchical Groupings
+
+- **Isolation**: Changes within a Division have minimal impact on other Divisions, enhancing system robustness.
+  
+- **Team Autonomy**: Different teams can manage separate Divisions or Companies, fostering specialization and efficient workflow management.
+  
+- **Clear Boundaries**: Establishing clear boundaries helps in defining ownership, responsibilities, and reduces the likelihood of cross-cutting concerns causing conflicts.
+  
+- **Enhanced Reusability**: Common functionalities within a Division can be reused across different parts of the system or even different Companies if needed.
+
+### Best Practices
+
+- **Consistent Naming**: Ensure that Divisions and Companies are named intuitively to reflect their responsibilities and domains.
+  
+- **Loose Coupling**: Divisions should interact through well-defined interfaces to minimize dependencies and facilitate independent evolution.
+  
+- **Clear Documentation**: Maintain comprehensive documentation for each Division and Company, outlining their responsibilities, workflows, and interactions.
+  
+- **Scalable Infrastructure**: Implement infrastructure that supports scaling Divisions and Companies independently, such as microservices architectures or modular monoliths.
+  
+- **Dependency Management**: Use dependency injection and inversion of control principles to manage dependencies between Divisions and Companies effectively.
+
+---
+
+## Integrating Hierarchical Groupings into the Team Pattern
+
+### Maintaining Separation of Concerns
+
+Even with hierarchical groupings, it's crucial to maintain the core principles of the Team Pattern:
+
+- **Single Responsibility**: Each Delegator, Division, and Company should have a clear, distinct purpose.
+  
+- **Immutability**: State Models remain immutable, ensuring consistency across the system.
+  
+- **Error Handling**: Error Components continue to handle validations and exceptions without being tightly coupled to other components.
+
+### Communication Between Levels
+
+- **Delegators within Divisions** interact with their respective Workers, Fetchers, Investigators, and Error Components.
+  
+- **Divisions within Companies** interact through the Company’s interface, which may invoke Delegators from different Divisions as needed.
+  
+- **Companies** may interact with external systems, APIs, or other Companies through well-defined interfaces or service contracts.
+
+### Example Workflow Across Hierarchical Levels
+
+**Scenario**: A user registers, browses products, and places an order.
+
+1. **User Registration**:
+   - **Company** invokes `UserRegistrationDelegator` in the **User Management Division**.
+   - **Delegator** uses **Fetcher** to retrieve necessary data (if any) and **Worker** to process registration.
+   - **Error Components** validate input data and throw exceptions if validations fail.
+
+2. **Product Browsing**:
+   - **Company** invokes `ProductListingDelegator` in the **Product Catalog Division**.
+   - **Delegator** uses **Fetcher** to retrieve product data and **Worker** to format/display products.
+   - **Error Components** ensure data integrity.
+
+3. **Order Creation**:
+   - **Company** invokes `OrderCreationDelegator` in the **Order Processing Division**.
+   - **Delegator** coordinates with **Fetchers** to retrieve user and product data, uses **Workers** to create the order.
+   - **Error Components** validate order details.
+
+4. **Payment Processing**:
+   - **Company** invokes `PaymentProcessingDelegator` in the **Order Processing Division**.
+   - **Delegator** uses **Fetcher** to retrieve payment information, **Worker** to process payment.
+   - **Error Components** validate payment data.
+
+Each step maintains clear boundaries, with Delegators orchestrating workflows within their Divisions and Companies managing overarching processes.
+
+---
+
+## Visual Representation
+
+While Markdown doesn't support diagrams directly, here's a textual representation of the hierarchical structure:
+
+```
+Company: E-Commerce Platform
+│
+├── Division A: User Management
+│   ├── Delegator A1: User Registration
+│   ├── Delegator A2: User Authentication
+│   └── ...
+│
+├── Division B: Product Catalog
+│   ├── Delegator B1: Product Listing
+│   ├── Delegator B2: Product Search
+│   └── ...
+│
+└── Division C: Order Processing
+    ├── Delegator C1: Order Creation
+    ├── Delegator C2: Payment Processing
+    └── ...
+```
+
+This structure promotes a clear and organized architecture, facilitating easier navigation, maintenance, and scalability.
+
+---
+
 ## Conclusion
 
 This architectural pattern promotes a **clean**, **maintainable**, and **scalable** codebase by enforcing clear boundaries and responsibilities across different components. Adhering to best practices such as **immutability**, **single responsibility**, and **error handling** ensures that each part of the system is **predictable**, **testable**, and **easy to reason about**.
@@ -1306,4 +1663,3 @@ By following these guidelines and maintaining the integrity of each component's 
 ---
 
 *This guide serves as a comprehensive reference for implementing the architectural pattern, ensuring best practices are followed, and promoting a robust software development lifecycle.*
-
