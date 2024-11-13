@@ -1,4 +1,4 @@
-# Architectural Pattern Guide
+# Team Pattern Architectural Guide
 
 ## Introduction
 
