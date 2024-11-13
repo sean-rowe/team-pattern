@@ -415,7 +415,7 @@ class UserFetcher:
             ```
 
         **Parameters:**
-            - `user_id (int)`: The unique identifier of the user to retrieve
+            - `state (UserState)`: The user state object containing the current user state
 
         **Returns:**
             - `UserState`: An immutable state object containing the validated user data
