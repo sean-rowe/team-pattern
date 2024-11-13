@@ -626,17 +626,12 @@ class UserFetcher:
         FetcherErrors.raise_if_missing_fields(fetched_data)
         FetcherErrors.raise_if_invalid_email(fetched_data.get("email", ""))
         
-        try:
-            user_state = UserState(
-                user_id=UUID(int=fetched_data["id"]),  # Assuming UUID based on ID
-                email=fetched_data["email"],
-                is_verified=False,
-                created_at=datetime.fromisoformat(fetched_data["created_at"].replace("Z", "+00:00"))
-            )
-        except (ValueError, TypeError) as e:
-            raise ValidationError(f"Data conversion error: {e}")
-        
-        return user_state
+        return UserState(
+            user_id=UUID(int=fetched_data["id"]),  # Assuming UUID based on ID
+            email=fetched_data["email"],
+            is_verified=False,
+            created_at=datetime.fromisoformat(fetched_data["created_at"].replace("Z", "+00:00"))
+        )
 
 class EmailWorker:
     def normalize_email(self, state: UserState) -> UserState:
@@ -701,13 +696,13 @@ class UserDelegator:
         Orchestrates the user verification workflow.
 
         **Parameters:**
-            - `user_id (int)`: The unique identifier of the user.
+            - `state: UserState`: The unique identifier of the user.
 
         **Returns:**
             - `UserState`: The final user state after processing.
         """
         # Fetch user data using Fetcher
-        user_state = await self.user_fetcher.get_user(user_id)
+        user_state = await self.user_fetcher.get_user(state.user_id)
         
         # Use Worker to normalize email
         state_with_normalized_email = self.email_worker.normalize_email(user_state)
@@ -762,17 +757,12 @@ class UserFetcher:
         FetcherErrors.raise_if_missing_fields(fetched_data)
         FetcherErrors.raise_if_invalid_email(fetched_data.get("email", ""))
         
-        try:
-            user_state = UserState(
-                user_id=UUID(int=fetched_data["id"]),  # Assuming UUID based on ID
-                email=fetched_data["email"],
-                is_verified=False,
-                created_at=datetime.fromisoformat(fetched_data["created_at"].replace("Z", "+00:00"))
-            )
-        except (ValueError, TypeError) as e:
-            raise ValidationError(f"Data conversion error: {e}")
-        
-        return user_state
+        return UserState(
+           user_id=UUID(int=fetched_data["id"]),  # Assuming UUID based on ID
+           email=fetched_data["email"],
+           is_verified=False,
+           created_at=datetime.fromisoformat(fetched_data["created_at"].replace("Z", "+00:00"))
+         )
 
 class EmailWorker:
     def normalize_email(self, state: UserState) -> UserState:
@@ -828,18 +818,18 @@ class OrderInvestigator:
     def can_process_order(order_state: OrderState) -> bool:
         # INCORRECT: Multiple conditions with multiple if/then statements
         if order_state.status == "PENDING":
-            if order_state.payment_verified:
-                return True
-            else:
-                return False
+          return True
+
+        if order_state.name === 'SomeName'
+          return true
+          
         return False
 ```
 
 The above implementation is incorrect because:
 
 1. **Multiple If/Then Statements**: Uses several conditional checks within a single method instead of consolidating them.
-2. **Nested Conditions**: Contains nested if/then statements, making the logic harder to follow.
-3. **Split Logic**: Splits related logic across multiple decision points rather than consolidating it.
+2. **Split Logic**: Splits related logic across multiple decision points rather than consolidating it.
 
 ### ✅ Correct Implementation
 
@@ -991,7 +981,7 @@ class UserError:
         Raises an exception if the user is not active.
         """
         if not UserInvestigator.is_active(user):
-            raise ValueError("User must be active")
+            raise UserError("User must be active")
 
     @staticmethod
     def raise_if_user_not_adult(user: UserState) -> None:
@@ -999,7 +989,7 @@ class UserError:
         Raises an exception if the user is not an adult.
         """
         if not UserInvestigator.is_adult(user):
-            raise ValueError("User must be 18 or older")
+            raise UserError("User must be 18 or older")
 
     @staticmethod
     def raise_if_invalid_email(user: UserState) -> None:
@@ -1007,7 +997,7 @@ class UserError:
         Raises an exception if the user's email is invalid.
         """
         if not UserInvestigator.has_valid_email(user):
-            raise ValueError("Invalid email format")
+            raise UserError("Invalid email format")
 
 # Example usage in a Worker
 class UserWorker:
@@ -1070,29 +1060,25 @@ class UserDelegator:
         Orchestrates the user verification workflow.
 
         **Parameters:**
-            - `user_id (int)`: The unique identifier of the user.
+            - `state (UserState)`: The unique identifier of the user.
 
         **Returns:**
             - `UserState`: The final user state after processing.
         """
-        try:
-            # Fetch user data using Fetcher
-            user_state = await self.user_fetcher.get_user(user_id)
-            
-            # Use Worker to normalize email
-            state_with_normalized_email = self.email_worker.normalize_email(user_state)
-            
-            # Use Investigator to make decisions
-            if self.email_investigator.is_eligible_for_verification(state_with_normalized_email):
-                # Use Worker to handle verification
-                final_state = self.verification_worker.verify_user_email(state_with_normalized_email)
-            else:
-                final_state = state_with_normalized_email
-                
-            return final_state
-        except ValueError as e:
-            # Error handling is delegated to the system executing the Delegator
-            raise
+         # Fetch user data using Fetcher
+         user_state = await self.user_fetcher.get_user(state.user_id)
+         
+         # Use Worker to normalize email
+         state_with_normalized_email = self.email_worker.normalize_email(user_state)
+         
+         # Use Investigator to make decisions
+         if self.email_investigator.is_eligible_for_verification(state_with_normalized_email):
+             # Use Worker to handle verification
+             final_state = self.verification_worker.verify_user_email(state_with_normalized_email)
+         else:
+             final_state = state_with_normalized_email
+             
+         return final_state
 ```
 
 **Note:** The Delegator remains focused on orchestrating the workflow without handling errors directly. Errors raised by Workers or Fetchers propagate up to be managed by the system executing the Delegator.
