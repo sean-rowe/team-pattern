@@ -2,7 +2,7 @@
 
 ## Introduction
 
-Creating systems that are **maintainable**, **scalable**, and **robust** is crucial. As applications grow in complexity, adopting an architectural pattern that promotes clear separation of concerns, modularity, and efficient error handling becomes essential. 
+In the ever-evolving landscape of software development, creating systems that are **maintainable**, **scalable**, and **robust** is crucial. As applications grow in complexity, adopting an architectural pattern that promotes clear separation of concerns, modularity, and efficient error handling becomes essential.
 
 This guide introduces the **Team Pattern**—a comprehensive architectural framework designed to streamline the development process by defining distinct roles and responsibilities for various components within a system. By adhering to this pattern, development teams can ensure that each part of the application is focused, testable, and easy to maintain, ultimately leading to higher quality and more resilient software.
 
@@ -14,7 +14,7 @@ The Team Pattern is built around six key components, each with a specific role:
 
 2. **Fetchers**: Manage data access and retrieval from external systems, abstracting complexities and providing clean interfaces for data consumption. Fetchers return Pydantic models representing the extracted data and do not handle errors internally.
 
-3. **Delegators**: Orchestrate workflows by coordinating between Fetchers, Workers, and Investigators to manage complex business processes seamlessly. Delegators contain only a single `process` method and rely on Investigators for decision-making without interacting with Error components.
+3. **Delegators**: Orchestrate workflows by coordinating between Fetchers, Workers, and Investigators to manage complex business processes seamlessly. Delegators contain only a single `process` method, avoid direct data manipulation, do not manage state beyond the provided state objects, and rely on Investigators for decision-making without interacting with Error components.
 
 4. **Investigators**: Enforce business rules and validations, maintaining data integrity by answering specific true/false questions about the data. They are pure functions that check only one condition per method.
 
@@ -46,29 +46,29 @@ This guide delves into each component of the Team Pattern, providing examples of
 
 ## Table of Contents
 
-1. [Workers](#1-workers)
+1. [Workers](#workers)
    - [❌ Bad Example (Non-Compliant Worker)](#bad-example-non-compliant-worker)
    - [✅ Good Example (Compliant Worker)](#good-example-compliant-worker)
    - [Key Differences](#key-differences)
-2. [Fetchers](#2-fetchers)
+2. [Fetchers](#fetchers)
    - [❌ Bad Implementation](#bad-implementation)
    - [✅ Good Implementation](#good-implementation)
    - [Key Differences and Improvements in the Good Implementation](#key-differences-and-improvements-in-the-good-implementation)
-3. [Delegators](#3-delegators)
+3. [Delegators](#delegators)
    - [❌ Incorrect Delegator Implementation](#incorrect-delegator-implementation)
    - [✅ Correct Delegator Implementation](#correct-delegator-implementation)
    - [Key Differences](#key-differences-1)
    - [Supporting Components](#supporting-components)
-4. [Investigators](#4-investigators)
+4. [Investigators](#investigators)
    - [❌ Incorrect Implementation](#incorrect-implementation)
    - [✅ Correct Implementation](#correct-implementation)
    - [Key Differences](#key-differences-2)
-5. [Error Components](#5-error-components)
+5. [Error Components](#error-components)
    - [❌ Incorrect Implementation](#incorrect-implementation-1)
    - [✅ Correct Implementation](#correct-implementation-1)
    - [Key Differences and Explanations](#key-differences-and-explanations)
    - [Usage Example](#usage-example)
-6. [State Models](#6-state-models)
+6. [State Models](#state-models)
    - [❌ Incorrect Implementation](#incorrect-implementation-2)
    - [✅ Correct Implementation](#correct-implementation-2)
    - [Key Aspects](#key-aspects)
@@ -77,7 +77,7 @@ This guide delves into each component of the Team Pattern, providing examples of
 
 ---
 
-## 1. Workers
+## Workers
 
 **Workers** handle the core logic and transformations, ensuring that business operations are executed correctly and efficiently. They are exclusively invoked by Delegators and must utilize Error class `assertion` methods to validate the data within the state they process.
 
@@ -96,18 +96,18 @@ class UserState:
 
 class BadUserRegistrationWorker:
     def process_registration(self, user_state: UserState) -> UserState:
-        # ❌ IMultiple responsibilities and no error assertions
+        # ❌ Multiple responsibilities and no error assertions
         if not self.is_valid_email(user_state.email):
             raise ValueError("Invalid email format")
 
-        # ❌ IDirect data manipulation without using Error assertions
+        # ❌ Direct data manipulation without using Error assertions
         user_state.created_at = datetime.now()
 
-        # ❌ IBranching logic that should be in Investigators
+        # ❌ Branching logic that should be in Investigators
         if len(user_state.password) < 8:
             return self.handle_weak_password(user_state)
         
-        # ❌ ICalling another worker (not allowed)
+        # ❌ Calling another worker (not allowed)
         password_worker = PasswordHashingWorker()
         hashed_password = password_worker.hash_password(user_state.password)
         
@@ -118,11 +118,11 @@ class BadUserRegistrationWorker:
         )
 
     def is_valid_email(self, email: str) -> bool:
-        # ❌ IWorker containing multiple methods (violation)
+        # ❌ Worker containing multiple methods (violation)
         return '@' in email
 
     def handle_weak_password(self, user_state: UserState) -> UserState:
-        # ❌ IAdditional method and branching logic (violation)
+        # ❌ Additional method and branching logic (violation)
         raise ValueError("Password too weak")
 ```
 
@@ -141,15 +141,27 @@ class UserState(BaseModel):
     class Config:
         frozen = True
 
+class UserRegistrationInvestigator:
+    """
+    Investigator class to enforce business rules for user registration.
+    """
+    @staticmethod
+    def is_valid_email(email: str) -> bool:
+        return '@' in email
+
+    @staticmethod
+    def is_valid_password_length(password: str) -> bool:
+        return len(password) >= 8
+
 class UserRegistrationErrors:
     @staticmethod
     def assert_valid_email(email: str) -> None:
-        if '@' not in email:
+        if not UserRegistrationInvestigator.is_valid_email(email):
             raise ValueError("Invalid email format")
 
     @staticmethod
     def assert_valid_password_length(password: str) -> None:
-        if len(password) < 8:
+        if not UserRegistrationInvestigator.is_valid_password_length(password):
             raise ValueError("Password too short")
 
 class UserRegistrationWorker:
@@ -184,6 +196,7 @@ class UserRegistrationWorker:
     **See:**
         - `UserState`
         - `UserRegistrationErrors`
+        - `UserRegistrationInvestigator`
 
     **Parameters:**
         - `state (UserState)`: The initial user registration state containing email 
@@ -211,18 +224,18 @@ class UserRegistrationWorker:
 
 1. **Documentation**: The compliant Worker includes comprehensive docstrings covering Summary, Remarks, Example, Throws, See, Parameters, and Returns.
 2. **Single Responsibility**: Focuses solely on core transformations without mixing in business logic decisions.
-3. **Error Assertions**: Utilizes dedicated Error class methods for validation instead of direct validation.
+3. **Error Assertions**: Utilizes dedicated Error class methods that leverage Investigators for validation instead of direct validation.
 4. **No Branching**: Avoids conditional logic, delegating decisions to Investigators.
 5. **Immutability**: Creates new state objects rather than modifying existing ones.
 6. **No Additional Methods**: Contains only the `process` method.
 7. **No Worker Chaining**: Does not call other Workers.
-8. **Clear Validation**: Uses a separate Error class for assertions.
+8. **Clear Validation**: Uses a separate Error class that relies on Investigators for assertions.
 9. **State Management**: Employs Pydantic models with `frozen=True` for immutability.
 10. **Focus on Transformation**: Concentrates solely on data transformation without mixing in business logic decisions.
 
 ---
 
-## 2. Fetchers
+## Fetchers
 
 **Fetchers** manage data access and retrieval, abstracting the complexities of external systems and providing clean interfaces for data consumption. They do not create state objects but return one or more Pydantic models representing the extracted data. Fetchers do not handle errors; any errors encountered bubble up to be managed by the system executing the Delegator.
 
@@ -378,7 +391,7 @@ class UserFetcher:
 
 ---
 
-## 3. Delegators
+## Delegators
 
 **Delegators** orchestrate the workflow by coordinating between Fetchers, Workers, and Investigators to manage complex business processes seamlessly. They contain only a single `process` method, avoid direct data manipulation, do not manage state beyond the provided state objects, and rely on Investigators for decision-making without interacting with Error components.
 
@@ -452,13 +465,43 @@ class UserState(BaseModel):
     class Config:
         frozen = True
 
+class UserFetcher:
+    async def get_user(self, user_id: str) -> 'UserData':
+        # Implementation of fetching user data
+        pass
+
+class EmailWorker:
+    async def process(self, state: UserState, user_data: 'UserData') -> UserState:
+        # Process email data and return new state
+        return UserState(
+            user_id=state.user_id,
+            email=user_data.email,
+            is_verified=state.is_verified,
+            created_at=state.created_at
+        )
+
+class VerificationWorker:
+    async def process(self, state: UserState) -> UserState:
+        # Handle verification and return new state
+        return UserState(
+            user_id=state.user_id,
+            email=state.email,
+            is_verified=True,
+            created_at=state.created_at
+        )
+
+class EmailInvestigator:
+    def is_eligible_for_verification(self, state: UserState) -> bool:
+        # Single condition check
+        return state.email is not None and '@' in state.email
+
 class UserDelegator:
     def __init__(
         self,
-        user_fetcher: 'UserFetcher',
-        email_worker: 'EmailWorker',
-        verification_worker: 'VerificationWorker',
-        email_investigator: 'EmailInvestigator'
+        user_fetcher: UserFetcher,
+        email_worker: EmailWorker,
+        verification_worker: VerificationWorker,
+        email_investigator: EmailInvestigator
     ):
         self.user_fetcher = user_fetcher
         self.email_worker = email_worker
@@ -513,7 +556,8 @@ class EmailWorker:
         return UserState(
             user_id=state.user_id,
             email=user_data.email,
-            is_verified=state.is_verified
+            is_verified=state.is_verified,
+            created_at=state.created_at
         )
 
 class VerificationWorker:
@@ -522,7 +566,8 @@ class VerificationWorker:
         return UserState(
             user_id=state.user_id,
             email=state.email,
-            is_verified=True
+            is_verified=True,
+            created_at=state.created_at
         )
 
 class EmailInvestigator:
@@ -533,7 +578,7 @@ class EmailInvestigator:
 
 ---
 
-## 4. Investigators
+## Investigators
 
 **Investigators** enforce business rules and validations, maintaining data integrity by answering specific true/false questions about the data. They are pure functions that check only one condition per method.
 
@@ -623,7 +668,7 @@ This approach ensures that Investigators remain focused, maintainable, and easy 
 
 ---
 
-## 5. Error Components
+## Error Components
 
 **Error** components provide a robust error handling framework, acting as type guards to validate state objects. They utilize Investigators to assess data and raise exceptions if validations fail. Delegators do not interact directly with Error components; instead, Workers and Investigators handle validations and error assertions.
 
@@ -805,7 +850,7 @@ This structure enhances maintainability, testability, and clarity, adhering to t
 
 ---
 
-## 6. State Models
+## State Models
 
 **State** models define immutable data structures that traverse the system, ensuring consistency and reliability throughout the processing pipeline. They validate the shape of the data but remain agnostic to business rules, focusing solely on data structure integrity.
 
@@ -966,7 +1011,7 @@ class UserProfileInvestigator:
 class UserProfileError:
     @staticmethod
     def assert_valid_age(state: UserProfileState) -> None:
-        if not UserProfileInvestigator.is_valid_age(state):
+        if not UserProfileInvestigator.is_adult(state):
             raise ValueError(f"User must be 18 or older. Current age: {state.age}")
 
 # ✅ This belongs in a Worker class
@@ -1017,3 +1062,5 @@ By following these guidelines and maintaining the integrity of each component's 
 ---
 
 *This guide serves as a comprehensive reference for implementing the architectural pattern, ensuring best practices are followed, and promoting a robust software development lifecycle.*
+
+---
