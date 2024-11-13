@@ -18,7 +18,7 @@ The Team Pattern is built around six key components, each with a specific role:
 
 4. **Investigators**: Enforce business rules and validations, maintaining data integrity by answering specific true/false questions about the data. They are pure functions that check only one condition per method.
 
-5. **Error Components**: Provide a robust error handling framework, acting as type guards to validate state objects. They utilize Investigators to assess data and raise exceptions if validations fail. Delegators do not interact directly with Error components; instead, Workers and Investigators handle validations and error assertions.
+5. **Error Components**: Provide a error handling framework, acting as type guards to validate state objects. They utilize Investigators to assess data and raise exceptions if validations fail. Delegators do not interact directly with Error components; instead, Workers and Investigators handle validations and error assertions.
 
 6. **State Models**: Define immutable data structures that traverse the system, ensuring consistency and reliability throughout the processing pipeline. They validate the shape of the data but remain agnostic to business rules, focusing solely on data structure integrity.
 
