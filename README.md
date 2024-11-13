@@ -569,12 +569,10 @@ class BadUserDelegator:
         
         return user_state
 
-    # ❌ Additional methods beyond process
     def fetch_user_data(self, user_id: str) -> dict:
         # Direct data fetching instead of using Fetchers
         return {"email": "user@example.com"}
 
-    # ❌ Additional methods beyond process
     def update_user_status(self, state: UserState) -> None:
         # Direct database update
         pass
