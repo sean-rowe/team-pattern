@@ -81,7 +81,7 @@ This guide delves into each component of the Team Pattern, providing examples of
 
 **Workers** handle the core logic and transformations, ensuring that business operations are executed correctly and efficiently. They are exclusively invoked by Delegators and must utilize Error class `assertion` methods to validate the data within the state they process.
 
-### ❌ Bad Example (Non-Compliant Worker)
+### ❌ Bad Example Non-Compliant Worker
 
 ```python
 from dataclasses import dataclass
@@ -126,7 +126,7 @@ class BadUserRegistrationWorker:
         raise ValueError("Password too weak")
 ```
 
-### ✅ Good Example (Compliant Worker)
+### ✅ Good Example Compliant Worker
 
 ```python
 from datetime import datetime
