@@ -390,7 +390,7 @@ class UserFetcher:
         """
         self.base_url = base_url
 
-    async def get_user(self, user_id: int) -> UserState:
+    async def get_user(self, state: UserState) -> UserState:
         """
         Retrieves user data from the API for a given user ID.
 
@@ -431,7 +431,7 @@ class UserFetcher:
             - `FetcherErrors`
             - [API Documentation](https://api.example.com/docs#get-user)
         """
-        response = requests.get(f"{self.base_url}/users/{user_id}")
+        response = requests.get(f"{self.base_url}/users/{state.user_id}")
         
         # Let the response error propagate up
         response.raise_for_status()
