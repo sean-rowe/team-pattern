@@ -100,7 +100,7 @@ class BadUserRegistrationWorker:
         if not self.is_valid_email(user_state.email):
             raise ValueError("Invalid email format")
 
-        # ❌ Direct data manipulation without using Error assertions
+        # ❌ Direct data manipulation on a state object
         user_state.created_at = datetime.now()
 
         # ❌ Branching logic that should be in Investigators
