@@ -1,155 +1,345 @@
-### **Team Pattern Architecture**
+# Team Pattern Architecture Guide
 
-#### **Core Components and Their Responsibilities**
+## 1. Workers
 
-- **State Models**
-  - **Definition:**
-    - Immutable data structures defined using tools like **Pydantic** in Python.
-  - **Responsibilities:**
-    - Validate the structure and types of data upon instantiation.
-    - Serve as the single source of truth for data representation.
-    - Ensure data immutability to prevent unintended side-effects.
-    - Facilitate consistent data handling across the system.
-    - **Method Signatures:**
-      - All methods **only** accept a **State Object** as a parameter.
-      - The **State Object** must contain **all necessary fields** required for the method to perform its task.
+Workers transform state in specific, predictable ways. Each Worker method takes a state object and returns a new one, making a single well-defined transformation. This pure-function approach means every data change is explicit and trackable - there are no side effects or hidden modifications.
 
-- **Workers**
-  - **Definition:**
-    - Classes that perform specific, well-defined tasks within the workflow.
-  - **Responsibilities:**
-    - Implemented as `@staticmethod` methods.
-    - **Only** accept **one parameter**: a **State Object**.
-    - **Do not** handle validations or error management directly.
-    - **Do not** contain any branching logic (`if`, `else`, etc.).
-    - Invoke **Error Components** to perform assertions, ensuring business rules are met.
-    - Assume that all business rule conditions have been validated by **Delegators** via **Error Components**.
-    - Perform data transformations and return new immutable **State Objects** without altering existing ones.
+The restriction to accepting only state objects creates a clear contract: Workers don't fetch data, don't handle external services, and don't coordinate complex operations. They transform data in one specific way, making their behavior easy to understand, test, and modify.
 
-- **Fetchers**
-  - **Definition:**
-    - Classes responsible for retrieving data from external systems (e.g., APIs, databases).
-  - **Responsibilities:**
-    - Instantiate and return **State Models**, relying on the models to validate data shape during creation.
-    - **Do not** handle business rules or perform validations beyond constructing **State Models**.
-    - **Do not** catch or handle errors; all errors bubble up to the caller.
-    - Abstract the complexities of data access, providing a clean interface for data retrieval.
-    - **Method Signatures:**
-      - All methods **only** accept a **State Object** as a parameter.
-      - The **State Object** must contain **all necessary fields** required for the method to perform its task.
+This separation has concrete benefits in long-term maintenance. When a business process changes, you know exactly which Worker needs to be modified. When debugging, you can trace data transformations step by step through Worker methods. When adding new features, you can create new Workers without touching existing ones.
 
-- **Investigators**
-  - **Definition:**
-    - Pure functions that enforce business rules and domain-specific validations.
-  - **Responsibilities:**
-    - Evaluate specific conditions based on the data.
-    - Provide boolean responses indicating whether certain business rules are satisfied.
-    - Remain stateless and side-effect-free.
-    - **Used By:**
-      - **Error Components** to perform assertions and raise exceptions when validations fail.
-      - **Delegators** to perform additional business rule validations before orchestrating workflows.
+```python
+from datetime import datetime
+from pydantic import BaseModel, EmailStr
 
-- **Error Components**
-  - **Definition:**
-    - Classes that handle validation failures and other exceptions in a standardized manner.
-  - **Responsibilities:**
-    - Contain **static methods** prefixed with `assert_` (e.g., `assert_valid_user_data`).
-    - **Do not** maintain any state; operate solely on **State Objects**.
-    - Utilize **Investigators** to evaluate business rules.
-    - Raise standardized exceptions (e.g., `ValidationError`, `BusinessRuleError`) when validations fail.
-    - Ensure consistent error handling across the system.
-    - Are invoked **only by Workers** to perform necessary validations.
-    - **Method Signatures:**
-      - All methods **only** accept a **State Object** as a parameter.
-      - The **State Object** must contain **all necessary fields** required for the method to perform its task.
+class UserState(BaseModel):
+    email: EmailStr
+    created_at: datetime
+    is_verified: bool = False
 
-- **Delegators**
-  - **Definition:**
-    - Classes that orchestrate workflows by coordinating between **Workers** and **Investigators**.
-  - **Responsibilities:**
-    - Are decorated to enforce that they **only** contain a `process` method.
-    - The `process` method **only** accepts a **State Object** as input and **only** returns a **State Object** as output.
-    - **Do not** handle business logic or error management directly.
-    - Utilize **Investigators** to perform business rule validations before delegating tasks to **Workers**.
-    - **Do not** interact directly with **Error Components**; instead, rely on **Workers** to invoke them for assertions.
-    - Allow exceptions raised by **Error Components** through **Workers** to propagate to the caller.
-    - Are responsible for initiating and managing the sequence of task executions.
+    class Config:
+        frozen = True
 
-#### **Architectural Rules and Constraints**
+class UserWorker:
+    """Transforms user data in specific ways."""
+    
+    @staticmethod
+    def normalize_email(state: UserState) -> UserState:
+        """Creates new state with normalized email."""
+        return UserState(
+            email=state.email.lower(),
+            created_at=state.created_at,
+            is_verified=state.is_verified
+        )
 
-- **Single Responsibility Principle**
-  - Each component (**Worker**, **Fetcher**, **Delegator**, etc.) must have a clear, single responsibility.
-  - Prevents overlap of functionalities and enhances maintainability.
+    @staticmethod
+    def mark_as_verified(state: UserState) -> UserState:
+        """Creates new state with verified status."""
+        return UserState(
+            email=state.email,
+            created_at=state.created_at,
+            is_verified=True
+        )
+```
 
-- **Clear Separation of Concerns**
-  - **State Models** handle data shape validations upon instantiation.
-  - **Investigators** manage business rule validations.
-  - **Delegators** manage workflow orchestration without embedding business logic or error handling.
+Consider how this Worker handles email normalization. It doesn't check if the email is valid (that's handled by the State Model), doesn't verify business rules (that's for Investigators), and doesn't coordinate with other operations (that's for Delegators). It does one thing: converts the email to lowercase and returns a new state.
 
-- **Immutable State Management**
-  - All **State Models** are immutable, ensuring data consistency throughout the workflow.
-  - Workers and Delegators return new **State Objects** instead of modifying existing ones.
+This focused responsibility means that when the email normalization rules change (maybe we need to handle new email formats), we modify just this Worker. When we need to track how an email was changed, we can look at the Worker's transformations. When we add new email-related features, we add new Worker methods without changing existing ones.
 
-- **Standardized Method Signatures**
-  - All methods across components (except those interacting with external libraries) **only** accept **State Objects** as parameters.
-  - The **State Object** must contain **all necessary fields** for the method to perform its task.
-  - Enforces consistency and simplifies tracking of data changes.
+Testing becomes straightforward because each transformation is isolated:
 
-- **No Component Sharing Across Teams**
-  - Components are not shared between different teams or Divisions.
-  - Use **shared libraries** for common functionalities to maintain loose coupling.
+```python
+def test_email_normalization():
+    # Given a user state with mixed-case email
+    initial_state = UserState(
+        email="User@Example.com",
+        created_at=datetime.utcnow(),
+        is_verified=False
+    )
+    
+    # When we normalize the email
+    worker = UserWorker()
+    new_state = worker.normalize_email(initial_state)
+    
+    # Then we get a new state with lowercase email
+    assert new_state.email == "user@example.com"
+    # And other fields remain unchanged
+    assert new_state.created_at == initial_state.created_at
+    assert new_state.is_verified == initial_state.is_verified
+    # And the original state is unchanged
+    assert initial_state.email == "User@Example.com"
+```
 
-#### **Error Handling**
+## 2. Investigators
 
-- **Centralized Error Management**
-  - **Error Components** are solely responsible for raising exceptions based on validations.
-  - **Workers** delegate validation tasks to **Error Components** and **do not handle errors themselves**.
-  - **Delegators** do not catch or manage errors; exceptions bubble up to the initiating process.
+Investigators embody your organization's business rules as pure functions. Unlike data validation, which checks if data is correctly formatted and valid, Investigators check if data meets specific business requirements. These requirements often change as your business evolves, which is why they're kept separate from structural validation.
 
-- **Standardized Exceptions**
-  - Define specific exception classes (e.g., `ValidationError`, `BusinessRuleError`) to categorize errors.
-  - Ensures uniform error responses and simplifies debugging.
+Think of Investigators like policy enforcers. They don't transform data (that's for Workers), don't validate data structure (that's for State Models), and don't handle errors (that's for Error components). They answer one specific question about whether a state meets a business requirement.
 
-#### **Dependency Injection and Enforcement**
+The power of this separation becomes clear when business rules change. If your company decides to modify the eligibility rules for a holiday promotion, you know exactly where to make that change. If you need to add new rules, you add new methods. If you need to understand why a user wasn't eligible for something, you can look at each rule in isolation.
 
-- **Dependency Injection (DI)**
-  - Utilize a DI Container to manage and inject dependencies into **Delegators**.
-  - Ensures that **Delegators** receive the correct instances of **Workers** without manual wiring.
+```python
+class PromotionInvestigator:
+    """Checks business rules for promotional eligibility."""
+    
+    @staticmethod
+    def is_eligible_for_holiday_promotion(state: UserState) -> bool:
+        """Business rule: Holiday promotion only for users registered > 30 days."""
+        return (datetime.now() - state.created_at).days > 30
+    
+    @staticmethod
+    def can_receive_loyalty_discount(state: UserState) -> bool:
+        """Business rule: Company policy requires verified status for loyalty program."""
+        return state.is_verified
+```
 
-- **Decorators for Enforcement**
-  - **@delegator**: Ensures the class only contains a `process` method with the correct signature.
-  - **@worker**: Enforces that all methods are `@staticmethod`, accept only a **State Object**, and contain no branching logic.
-  - **@error_component**: Ensures all methods start with `assert_`, are `@staticmethod`, and accept only a **State Object**.
-  - These decorators perform checks at class definition time, preventing misconfigurations.
+Each method in an Investigator returns a simple boolean. They don't throw errors (that's what Error components do using these Investigators). They don't have side effects. They check one specific condition about the state of your data.
 
-#### **Hierarchical Organization**
+This makes testing business rules straightforward and comprehensive:
 
-- **Divisions**
-  - Collections of related **Delegators** handling specific business domains or functionalities.
-  - Operate semi-independently, encapsulating their workflows and components.
-  - Promote modularity and scalability within large systems.
+```python
+def test_holiday_promotion_eligibility():
+    # Given a user who registered 31 days ago
+    state = UserState(
+        email="user@example.com",
+        created_at=datetime.now() - timedelta(days=31),
+        is_verified=True
+    )
+    
+    # When we check holiday promotion eligibility
+    investigator = PromotionInvestigator()
+    
+    # Then they should be eligible
+    assert investigator.is_eligible_for_holiday_promotion(state) == True
+    
+    # Given a user who registered 29 days ago
+    recent_state = UserState(
+        email="new@example.com",
+        created_at=datetime.now() - timedelta(days=29),
+        is_verified=True
+    )
+    
+    # Then they should not be eligible
+    assert investigator.is_eligible_for_holiday_promotion(recent_state) == False
+```
 
-- **Companies**
-  - Top-level groupings encompassing multiple Divisions.
-  - Represent broader business areas or departments.
-  - Facilitate management of complex systems by defining clear boundaries and responsibilities.
+When auditing your system's business rules, each Investigator serves as clear documentation of what rules exist and how they're enforced. When adding new features, you can easily see what rules might need to be considered. When debugging why something happened, you can test each business rule independently.
 
-#### **Common Pitfalls and Mitigations**
+## 3. Error Components
 
-- **Duplicate Validation Logic Across Workers**
-  - **Mitigation**: Centralize validation logic in **Error Components** and shared libraries to prevent duplication.
+Error components translate business rule violations into actionable errors. While Investigators determine if rules are being followed, Error components decide what happens when they're not. They maintain a clear separation between detecting a problem (Investigators) and handling it (Error components).
 
-- **Inconsistent Error Handling**
-  - **Mitigation**: Standardize exception classes and enforce their usage through **Error Components**.
+This separation serves multiple purposes. First, it allows you to change how you handle rule violations without changing the rules themselves. Second, it provides a central place to manage error messages and error types. Third, it makes it easy to add new error handling without touching existing business logic.
 
-- **Overlapping State Models**
-  - **Mitigation**: Define and reuse **State Models** from a common library to maintain consistency across Divisions.
+```python
+class PromotionError(Exception):
+    """Error class for promotion-related business rule violations."""
+    
+    @staticmethod
+    def raise_if_ineligible_for_holiday_promotion(state: UserState) -> None:
+        """Enforces holiday promotion eligibility rule."""
+        if not PromotionInvestigator.is_eligible_for_holiday_promotion(state):
+            raise PromotionError("User must be registered for at least 30 days for holiday promotion")
+    
+    @staticmethod
+    def raise_if_ineligible_for_loyalty_discount(state: UserState) -> None:
+        """Enforces loyalty program rules."""
+        if not PromotionInvestigator.can_receive_loyalty_discount(state):
+            raise PromotionError("User must be verified to receive loyalty discount")
+```
 
-- **Branching Logic in Workers**
-  - **Mitigation**: Enforce no branching through the **@worker** decorator and conduct thorough code reviews.
-  - 
-- **Incorrect Method Signatures**
-  - **Mitigation**: Utilize decorators to enforce method signatures and perform regular code audits to ensure compliance.
+Notice how the Error class:
+1. Inherits from Exception
+2. Uses Investigators to check conditions
+3. Only raises instances of itself
+4. Has clear, specific error messages
+5. Contains all error-raising methods related to its domain
 
-- **Missing Dependencies in DI Container**
-  - **Mitigation**: Ensure all required dependencies are registered in the DI Container before initializing Delegators.
+This makes error handling predictable and maintainable:
+
+```python
+def test_promotion_errors():
+    # Given an unverified user
+    state = UserState(
+        email="user@example.com",
+        created_at=datetime.now(),
+        is_verified=False
+    )
+    
+    # When we check loyalty eligibility
+    with pytest.raises(PromotionError) as error:
+        PromotionError.raise_if_ineligible_for_loyalty_discount(state)
+    
+    # Then we get the specific error message
+    assert str(error.value) == "User must be verified to receive loyalty discount"
+```
+
+Error components also provide a natural place to add logging, monitoring, or other error handling behaviors without cluttering business logic. When you need to change how errors are handled, you know exactly where to look.
+
+## 4. State Models
+
+State Models capture data structure and basic validation rules that transcend specific business contexts. Unlike business rules in Investigators, these validations represent fundamental truths about your data that rarely change and apply across different uses.
+
+```python
+from pydantic import BaseModel, EmailStr, Field, validator
+from datetime import datetime
+from uuid import UUID
+from decimal import Decimal
+
+class OrderState(BaseModel):
+    """Represents an order's state at any point in time."""
+    order_id: UUID
+    customer_id: UUID
+    items: list[UUID]
+    total_amount: Decimal = Field(ge=Decimal('0'))  # Must be non-negative
+    shipping_address: str = Field(min_length=1)     # Can't be empty
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    status: Literal['pending', 'processing', 'completed'] = 'pending'
+
+    @validator('shipping_address')
+    def address_must_contain_street_info(cls, v: str) -> str:
+        """Basic structural validation of address."""
+        parts = v.split()
+        if len(parts) < 3:  # Must have number, street type, and name at minimum
+            raise ValueError('Address must contain street number and name')
+        return v
+
+    class Config:
+        frozen = True  # Data is immutable
+        json_encoders = {  # How to serialize special types
+            UUID: str,
+            datetime: lambda dt: dt.isoformat(),
+            Decimal: str
+        }
+```
+
+Notice what belongs here:
+- Type definitions (UUID, Decimal, datetime)
+- Format constraints (non-empty strings, non-negative numbers)
+- Basic data integrity rules (addresses need certain parts)
+- Immutability configuration
+- Serialization rules
+
+And what doesn't:
+- Business rules about who can order
+- Validation of order totals against user limits
+- Shipping restrictions by region
+- Discount eligibility rules
+
+These State Models provide guarantees about data shape that every other component can rely on. When a Worker receives a state object, it knows the data is structurally valid and can focus on its transformations.
+
+```python
+def test_order_state_validation():
+    # Valid state passes
+    valid_state = OrderState(
+        order_id=uuid4(),
+        customer_id=uuid4(),
+        items=[uuid4()],
+        total_amount=Decimal('50.00'),
+        shipping_address='123 Main Street',
+    )
+    assert valid_state.total_amount == Decimal('50.00')
+
+    # Invalid: negative amount
+    with pytest.raises(ValidationError) as error:
+        OrderState(
+            order_id=uuid4(),
+            customer_id=uuid4(),
+            items=[uuid4()],
+            total_amount=Decimal('-10.00'),
+            shipping_address='123 Main Street',
+        )
+    assert "ensure this value is greater than or equal to 0" in str(error.value)
+
+    # Invalid: malformed address
+    with pytest.raises(ValidationError) as error:
+        OrderState(
+            order_id=uuid4(),
+            customer_id=uuid4(),
+            items=[uuid4()],
+            total_amount=Decimal('50.00'),
+            shipping_address='123',  # Missing street information
+        )
+```
+
+## 5. Delegators
+
+Delegators orchestrate workflows by coordinating other components. They contain exactly one public method - `process` - which takes a state object and returns a state object. Think of them as the workflow definition: they determine what happens next based on the current state.
+
+```python
+class OrderProcessingDelegator:
+    """Coordinates the order processing workflow."""
+
+    def __init__(
+        self,
+        inventory_worker: InventoryWorker,
+        pricing_worker: PricingWorker,
+        order_investigator: OrderInvestigator
+    ):
+        self.inventory_worker = inventory_worker
+        self.pricing_worker = pricing_worker
+        self.order_investigator = order_investigator
+
+    def process(self, state: OrderState) -> OrderState:
+        """Orchestrates order processing workflow."""
+        # Apply inventory checks
+        if self.order_investigator.can_fulfill_from_stock(state):
+            state = self.inventory_worker.reserve_inventory(state)
+        else:
+            state = self.inventory_worker.backorder_items(state)
+
+        # Apply pricing based on conditions
+        if self.order_investigator.is_bulk_order(state):
+            state = self.pricing_worker.apply_bulk_discount(state)
+
+        return state
+```
+
+Key aspects of Delegators:
+1. Only accept state objects as input
+2. Only return state objects as output
+3. Don't implement business logic
+4. Don't transform data directly
+5. Don't handle errors (let them propagate)
+6. Follow a clear workflow pattern
+
+Testing focuses on the orchestration flow:
+
+```python
+def test_order_delegator():
+    # Given an initial order state
+    state = OrderState(
+        order_id=uuid4(),
+        customer_id=uuid4(),
+        items=[uuid4()],
+        total_amount=Decimal('100.00'),
+        shipping_address='123 Main Street'
+    )
+    
+    # And mocked components
+    inventory_worker = Mock(
+        reserve_inventory=Mock(return_value=replace(state, inventory_reserved=True))
+    )
+    pricing_worker = Mock(
+        apply_bulk_discount=Mock(return_value=replace(state, total_amount=Decimal('90.00')))
+    )
+    order_investigator = Mock(
+        can_fulfill_from_stock=Mock(return_value=True),
+        is_bulk_order=Mock(return_value=True)
+    )
+
+    # When we process the order
+    delegator = OrderProcessingDelegator(
+        inventory_worker=inventory_worker,
+        pricing_worker=pricing_worker,
+        order_investigator=order_investigator
+    )
+    result = delegator.process(state)
+
+    # Then the workflow executed correctly
+    inventory_worker.reserve_inventory.assert_called_once()
+    pricing_worker.apply_bulk_discount.assert_called_once()
+    assert result.total_amount == Decimal('90.00')
+```
+
+The true power of Delegators comes from their clarity. Reading a Delegator's process method tells you exactly how your system handles a particular workflow. When requirements change, you know exactly where to modify the flow. When debugging, you can trace the exact path state took through your system.
