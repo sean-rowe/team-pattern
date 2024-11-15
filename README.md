@@ -11,7 +11,7 @@
     - Ensure data immutability to prevent unintended side-effects.
     - Facilitate consistent data handling across the system.
     - **Method Signatures:**
-      - All methods (except those interacting with external libraries) **only** accept a **State Object** as a parameter.
+      - All methods **only** accept a **State Object** as a parameter.
       - The **State Object** must contain **all necessary fields** required for the method to perform its task.
 
 - **Workers**
@@ -35,7 +35,7 @@
     - **Do not** catch or handle errors; all errors bubble up to the caller.
     - Abstract the complexities of data access, providing a clean interface for data retrieval.
     - **Method Signatures:**
-      - All methods (except those interacting with external libraries) **only** accept a **State Object** as a parameter.
+      - All methods **only** accept a **State Object** as a parameter.
       - The **State Object** must contain **all necessary fields** required for the method to perform its task.
 
 - **Investigators**
@@ -60,7 +60,7 @@
     - Ensure consistent error handling across the system.
     - Are invoked **only by Workers** to perform necessary validations.
     - **Method Signatures:**
-      - All methods (except those interacting with external libraries) **only** accept a **State Object** as a parameter.
+      - All methods **only** accept a **State Object** as a parameter.
       - The **State Object** must contain **all necessary fields** required for the method to perform its task.
 
 - **Delegators**
@@ -134,28 +134,6 @@
   - Represent broader business areas or departments.
   - Facilitate management of complex systems by defining clear boundaries and responsibilities.
 
-#### **Best Practices**
-
-1. **Comprehensive Documentation**
-   - Maintain detailed documentation outlining responsibilities and usage guidelines for each component.
-   - Facilitates understanding and correct implementation across teams.
-
-2. **Rigorous Code Reviews**
-   - Implement thorough code reviews to ensure adherence to the Team Pattern.
-   - Detect and prevent violations of architectural rules early in the development cycle.
-
-3. **Automated Testing**
-   - Develop extensive unit and integration tests to validate component functionality and interactions.
-   - Ensure that components behave as expected and maintain integrity throughout the workflow.
-
-4. **Effective Communication**
-   - Foster regular communication across Divisions to share best practices and updates on shared libraries.
-   - Promote consistency and prevent redundant work.
-
-5. **Continuous Monitoring and Refactoring**
-   - Regularly audit the codebase to identify and address any emerging duplication or inconsistency issues.
-   - Encourage a culture of continuous improvement and refactoring to maintain alignment with the pattern's principles.
-
 #### **Common Pitfalls and Mitigations**
 
 - **Duplicate Validation Logic Across Workers**
@@ -169,20 +147,9 @@
 
 - **Branching Logic in Workers**
   - **Mitigation**: Enforce no branching through the **@worker** decorator and conduct thorough code reviews.
-
-- **Divergent Library Versions**
-  - **Mitigation**: Implement strict version control policies and centralized dependency management using tools like **pipenv** or **poetry**.
-
+  - 
 - **Incorrect Method Signatures**
   - **Mitigation**: Utilize decorators to enforce method signatures and perform regular code audits to ensure compliance.
 
 - **Missing Dependencies in DI Container**
   - **Mitigation**: Ensure all required dependencies are registered in the DI Container before initializing Delegators.
-
----
-
-By adhering to these **rules and nuances**, the **Team Pattern** ensures a robust, maintainable, and scalable architecture, particularly suited for large-scale projects requiring organized and efficient workflows. This structured approach promotes consistency, clarity, and effective separation of concerns, facilitating seamless collaboration and streamlined development processes across diverse teams and Divisions.
-
----
-
-*If you have any further questions or need additional clarifications, feel free to ask!*
